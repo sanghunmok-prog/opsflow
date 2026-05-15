@@ -1,0 +1,21 @@
+services:
+  opsflow-sql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: opsflow-sql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${OPSFLOW_SQL_PASSWORD:-OpsFlow_dev_2026!}"
+      MSSQL_PID: Developer
+    ports:
+      - "14333:1433"
+    volumes:
+      - opsflow-sql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q \"SELECT 1\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  opsflow-sql-data:
