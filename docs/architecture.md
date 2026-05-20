@@ -2,13 +2,26 @@
 
 OpsFlow uses a single Angular frontend, a single ASP.NET Core Web API, and SQL Server. The architecture is intentionally straightforward so the portfolio signal comes from complete enterprise workflow implementation rather than unnecessary distributed-system complexity.
 
-## Planned Layers
+## Layers
 
 - `src/OpsFlow.Api`: HTTP API, request/response boundaries, health endpoint, and future API configuration.
 - `src/OpsFlow.Web`: Angular client application.
 - `tests/OpsFlow.Api.Tests`: backend test project.
+- `src/OpsFlow.Api/Data`: EF Core `OpsFlowDbContext`, domain entities, enums, migrations, and deterministic seed data.
 
-Future PRs may introduce additional backend projects if needed for domain, application, and infrastructure separation. PR-00 keeps the skeleton minimal and buildable.
+Future PRs may introduce additional backend projects if needed for domain, application, and infrastructure separation. PR-01 keeps the backend in the API project so the database foundation remains simple and reviewable.
+
+## Data Layer
+
+OpsFlow uses EF Core with SQL Server for the relational workflow model. The schema includes users, case types, SLA rules, cases, notes, status histories, assignment histories, approval requests, and audit logs.
+
+Enums are stored as strings for SQL readability. Business timestamps use UTC fields with a `Utc` suffix. `Cases.RowVersion` is configured as a SQL Server `rowversion` concurrency token for later command endpoints.
+
+Development seeding is deterministic and generated at runtime, not through large `HasData` migration blocks.
+
+## Architecture Decision
+
+OpsFlow uses a single API and SQL Server rather than microservices because the portfolio signal is workflow completeness, transaction boundaries, authorization, auditability, and reporting. A single deployable API keeps the implementation realistic for an internal operations system and avoids distributed-system scope that would not improve the core demo.
 
 ## Future Design Notes
 
@@ -20,4 +33,4 @@ Future PRs may introduce additional backend projects if needed for domain, appli
 
 ## ERD
 
-The ERD will be added after the database schema and EF migration PR.
+See [data-model.md](data-model.md).

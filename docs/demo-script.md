@@ -12,6 +12,6 @@ The final demo should show OpsFlow as an enterprise operations workflow applicat
 6. Submit or decide a manager approval.
 7. Return to the dashboard and show metrics updated from SQL-backed data.
 
-## PR-00 Status
+## PR-01 Status
 
-No demo workflow exists yet. This file is a placeholder for the final portfolio demo script.
+No application demo workflow exists yet. PR-01 seeds the database with realistic synthetic cases, overdue-ready work, pending approval samples, notes, histories, and audit logs so later PRs can support the final demo flow.

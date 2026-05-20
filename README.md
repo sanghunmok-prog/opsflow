@@ -6,7 +6,7 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 only establishes the repository skeleton, application projects, local development wiring, and documentation placeholders. Business features are intentionally deferred to later PRs.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 adds the SQL Server / EF Core database foundation and deterministic synthetic seed data. Business APIs, authentication, workflow services, and Angular business screens are intentionally deferred to later PRs.
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are not implemented in PR-00.
+These features are planned portfolio differentiators. PR-01 adds the data model that supports them, but it does not implement authentication, case APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
 
 ## Local Setup
 
@@ -42,8 +42,9 @@ Prerequisites:
 Initial verification commands:
 
 ```bash
-dotnet build
-dotnet test
+dotnet restore OpsFlow.sln
+dotnet build OpsFlow.sln
+dotnet test OpsFlow.sln
 cd src/OpsFlow.Web
 npm install
 npm run build
@@ -51,7 +52,46 @@ cd ../..
 docker compose config
 ```
 
-Run commands will be expanded as the API, database, and UI integration are implemented.
+## Local Database Setup
+
+Start SQL Server:
+
+```bash
+docker compose up -d
+```
+
+Apply EF Core migrations:
+
+```bash
+dotnet ef database update \
+  --project src/OpsFlow.Api/OpsFlow.Api.csproj \
+  --startup-project src/OpsFlow.Api/OpsFlow.Api.csproj
+```
+
+Run the API in development mode to apply any pending migrations and seed local demo data:
+
+```bash
+dotnet run --project src/OpsFlow.Api/OpsFlow.Api.csproj
+```
+
+The development connection string targets `localhost,1433` and database `OpsFlowDb`. Override it with standard ASP.NET Core configuration, for example:
+
+```bash
+ConnectionStrings__OpsFlowDb="Server=localhost,1433;Database=OpsFlowDb;User Id=sa;Password=<local-password>;TrustServerCertificate=True;Encrypt=True;" \
+dotnet run --project src/OpsFlow.Api/OpsFlow.Api.csproj
+```
+
+## Seed Data
+
+The development seeder is deterministic and safe to run repeatedly against an already-seeded database. It creates:
+
+- 5 demo users across Admin, Manager, and Analyst roles
+- 6 case types
+- 24 SLA rules covering every case type and priority combination
+- 320 synthetic operations cases
+- Sample notes, status histories, assignment histories, approval requests, and audit logs
+
+No passwords are seeded in PR-01.
 
 ## Demo Accounts
 
@@ -67,11 +107,12 @@ Demo accounts will be added with the authentication and authorization PR.
 
 Screenshots will be added as the Angular workflow screens are implemented.
 
-## Architecture And ERD
+## Architecture And Data Model
 
 - Architecture notes: [docs/architecture.md](docs/architecture.md)
 - API contract notes: [docs/api-contract.md](docs/api-contract.md)
 - PR plan: [docs/pr-plan.md](docs/pr-plan.md)
 - Demo script: [docs/demo-script.md](docs/demo-script.md)
+- Data model: [docs/data-model.md](docs/data-model.md)
 
-The ERD will be added after the database schema PR.
+The database schema was introduced in PR-01. API contracts and UI workflows will be implemented in later PRs.
