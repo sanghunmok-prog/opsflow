@@ -238,6 +238,12 @@ PublishScripts/
 
 # Microsoft Azure Build Output
 csx/
+
+# Local handoff artifacts
+/CURRENT_OPSFLOW_STATUS.txt
+/ZIP_CONTENTS_MANIFEST.txt
+/*handoff*.zip
+/opsflow_current_codebase_handoff.zip
 *.build.csdef
 
 # Microsoft Azure Emulator
@@ -450,3 +456,13 @@ docker-data/
 appsettings.Development.local.json
 appsettings.Local.json
 secrets.json
+
+# Local logs and handoff artifacts
+/opsflow_logs.txt
+/CURRENT_OPSFLOW_STATUS.txt
+/ZIP_CONTENTS_MANIFEST.txt
+/*handoff*.zip
+/opsflow_current_codebase_handoff.zip
+
+# Local active PR scratch file
+/docs/current-pr.md

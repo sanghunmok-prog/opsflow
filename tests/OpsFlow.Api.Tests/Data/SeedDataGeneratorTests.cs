@@ -1,5 +1,6 @@
-using OpsFlow.Api.Data.Enums;
-using OpsFlow.Api.Data.Seed;
+using OpsFlow.Domain.Constants;
+using OpsFlow.Domain.Enums;
+using OpsFlow.Infrastructure.Data.Seed;
 
 namespace OpsFlow.Api.Tests.Data;
 
@@ -12,17 +13,27 @@ public sealed class SeedDataGeneratorTests
     {
         var seedData = SeedDataGenerator.Generate(FixedNowUtc);
 
-        Assert.True(seedData.Cases.Count >= 300);
+        Assert.InRange(seedData.Cases.Count, 300, 500);
     }
 
     [Fact]
-    public void Generate_includes_admin_manager_and_analyst_users()
+    public void Generate_seeds_only_required_roles()
     {
-        var roles = SeedDataGenerator.Generate(FixedNowUtc).Users.Select(x => x.Role).ToHashSet();
+        var roles = SeedDataGenerator.Generate(FixedNowUtc).Roles
+            .Select(x => x.Name)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
 
-        Assert.Contains(UserRole.Admin, roles);
-        Assert.Contains(UserRole.Manager, roles);
-        Assert.Contains(UserRole.Analyst, roles);
+        Assert.Equal(OpsFlowRoles.All.Order(StringComparer.Ordinal), roles);
+    }
+
+    [Fact]
+    public void Generate_assigns_demo_users_to_required_roles()
+    {
+        var seedData = SeedDataGenerator.Generate(FixedNowUtc);
+
+        Assert.Equal(5, seedData.Users.Count);
+        Assert.Equal(seedData.Users.Count, seedData.UserRoles.Count);
     }
 
     [Fact]
@@ -58,6 +69,19 @@ public sealed class SeedDataGeneratorTests
 
         Assert.Equal(expectedCombinations, seedData.SlaRules.Count);
         Assert.Equal(expectedCombinations, actualCombinations);
+    }
+
+    [Fact]
+    public void Generate_uses_locked_sla_target_hours()
+    {
+        var targetHoursByPriority = SeedDataGenerator.Generate(FixedNowUtc).SlaRules
+            .GroupBy(x => x.Priority)
+            .ToDictionary(x => x.Key, x => x.Select(rule => rule.TargetHours).Distinct().Single());
+
+        Assert.Equal(120, targetHoursByPriority[CasePriority.Low]);
+        Assert.Equal(72, targetHoursByPriority[CasePriority.Medium]);
+        Assert.Equal(24, targetHoursByPriority[CasePriority.High]);
+        Assert.Equal(8, targetHoursByPriority[CasePriority.Critical]);
     }
 
     [Fact]
@@ -99,10 +123,43 @@ public sealed class SeedDataGeneratorTests
     [Fact]
     public void Generate_includes_pending_approval_samples()
     {
-        var pendingApprovals = SeedDataGenerator.Generate(FixedNowUtc).ApprovalRequests
-            .Count(x => x.Status == ApprovalStatus.Pending);
+        var seedData = SeedDataGenerator.Generate(FixedNowUtc);
+        var casesById = seedData.Cases.ToDictionary(x => x.Id);
+        var pendingApprovals = seedData.ApprovalRequests
+            .Where(x => x.Status == ApprovalStatus.Pending)
+            .ToArray();
 
-        Assert.True(pendingApprovals >= 10);
+        Assert.True(pendingApprovals.Length >= 10);
+        Assert.All(pendingApprovals, approval =>
+        {
+            Assert.Equal(CaseStatus.PendingApproval, casesById[approval.CaseId].Status);
+        });
+    }
+
+    [Fact]
+    public void Generate_has_at_most_one_pending_approval_per_case()
+    {
+        var duplicatePendingApprovals = SeedDataGenerator.Generate(FixedNowUtc).ApprovalRequests
+            .Where(x => x.Status == ApprovalStatus.Pending)
+            .GroupBy(x => x.CaseId)
+            .Where(x => x.Count() > 1);
+
+        Assert.Empty(duplicatePendingApprovals);
+    }
+
+    [Fact]
+    public void Generate_assignment_history_includes_required_reason()
+    {
+        var assignments = SeedDataGenerator.Generate(FixedNowUtc).AssignmentHistories;
+
+        Assert.NotEmpty(assignments);
+        Assert.All(assignments, assignment => Assert.False(string.IsNullOrWhiteSpace(assignment.Reason)));
+    }
+
+    [Fact]
+    public void CaseStatus_includes_pending_approval()
+    {
+        Assert.Contains(CaseStatus.PendingApproval, Enum.GetValues<CaseStatus>());
     }
 
     [Fact]

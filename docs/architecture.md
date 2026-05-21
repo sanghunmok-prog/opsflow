@@ -5,15 +5,15 @@ OpsFlow uses a single Angular frontend, a single ASP.NET Core Web API, and SQL S
 ## Layers
 
 - `src/OpsFlow.Api`: HTTP API, request/response boundaries, health endpoint, and future API configuration.
+- `src/OpsFlow.Application`: placeholder for future DTOs, service interfaces, and application use cases.
+- `src/OpsFlow.Domain`: entities, enums, and business constants.
+- `src/OpsFlow.Infrastructure`: EF Core `OpsFlowDbContext`, migrations, deterministic seed data, and Identity persistence.
 - `src/OpsFlow.Web`: Angular client application.
 - `tests/OpsFlow.Api.Tests`: backend test project.
-- `src/OpsFlow.Api/Data`: EF Core `OpsFlowDbContext`, domain entities, enums, migrations, and deterministic seed data.
-
-Future PRs may introduce additional backend projects if needed for domain, application, and infrastructure separation. PR-01 keeps the backend in the API project so the database foundation remains simple and reviewable.
 
 ## Data Layer
 
-OpsFlow uses EF Core with SQL Server for the relational workflow model. The schema includes users, case types, SLA rules, cases, notes, status histories, assignment histories, approval requests, and audit logs.
+OpsFlow uses EF Core with SQL Server for the relational workflow model. The schema includes ASP.NET Core Identity users/roles, case types, SLA rules, cases, notes, status histories, assignment histories, approval requests, and business audit logs.
 
 Enums are stored as strings for SQL readability. Business timestamps use UTC fields with a `Utc` suffix. `Cases.RowVersion` is configured as a SQL Server `rowversion` concurrency token for later command endpoints.
 
