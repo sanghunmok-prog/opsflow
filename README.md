@@ -6,14 +6,14 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 adds the SQL Server / EF Core database foundation and deterministic synthetic seed data. Business APIs, authentication, workflow services, and Angular business screens are intentionally deferred to later PRs.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. Business APIs, authentication endpoints, workflow services, and Angular business screens are intentionally deferred to later PRs.
 
 ## Tech Stack
 
 - Backend: ASP.NET Core Web API on .NET 10
 - Frontend: Angular 21 and TypeScript
 - Database: SQL Server 2022 for local development
-- Data access: Entity Framework Core
+- Data access: Entity Framework Core with ASP.NET Core Identity persistence
 - Tests: xUnit
 - Local orchestration: Docker Compose
 - CI: GitHub Actions
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are planned portfolio differentiators. PR-01 adds the data model that supports them, but it does not implement authentication, case APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
+These features are planned portfolio differentiators. The current foundation includes schema and deterministic seed data that support them, but it does not implement authentication endpoints, case APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
 
 ## Local Setup
 
@@ -64,7 +64,7 @@ Apply EF Core migrations:
 
 ```bash
 dotnet ef database update \
-  --project src/OpsFlow.Api/OpsFlow.Api.csproj \
+  --project src/OpsFlow.Infrastructure/OpsFlow.Infrastructure.csproj \
   --startup-project src/OpsFlow.Api/OpsFlow.Api.csproj
 ```
 
@@ -86,12 +86,13 @@ dotnet run --project src/OpsFlow.Api/OpsFlow.Api.csproj
 The development seeder is deterministic and safe to run repeatedly against an already-seeded database. It creates:
 
 - 5 demo users across Admin, Manager, and Analyst roles
+- exactly 3 Identity roles: Analyst, Manager, Admin
 - 6 case types
 - 24 SLA rules covering every case type and priority combination
 - 320 synthetic operations cases
 - Sample notes, status histories, assignment histories, approval requests, and audit logs
 
-No passwords are seeded in PR-01.
+No login endpoint or JWT issuing is implemented in PR-01A.
 
 ## Demo Accounts
 
@@ -115,4 +116,4 @@ Screenshots will be added as the Angular workflow screens are implemented.
 - Demo script: [docs/demo-script.md](docs/demo-script.md)
 - Data model: [docs/data-model.md](docs/data-model.md)
 
-The database schema was introduced in PR-01. API contracts and UI workflows will be implemented in later PRs.
+The database schema was introduced in PR-01 and corrected in PR-01A. API contracts and UI workflows will be implemented in later PRs.

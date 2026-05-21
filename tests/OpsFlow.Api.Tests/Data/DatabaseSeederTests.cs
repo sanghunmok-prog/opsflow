@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
-using OpsFlow.Api.Data;
-using OpsFlow.Api.Data.Seed;
+using OpsFlow.Infrastructure.Data;
+using OpsFlow.Infrastructure.Data.Seed;
 
 namespace OpsFlow.Api.Tests.Data;
 

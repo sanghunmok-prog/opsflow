@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\OpsFlow.Api\OpsFlow.Api.csproj" />
+    <ProjectReference Include="..\..\src\OpsFlow.Domain\OpsFlow.Domain.csproj" />
+    <ProjectReference Include="..\..\src\OpsFlow.Infrastructure\OpsFlow.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

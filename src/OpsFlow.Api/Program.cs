@@ -1,11 +1,17 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using OpsFlow.Api.Data;
-using OpsFlow.Api.Data.Seed;
+using OpsFlow.Domain.Entities;
+using OpsFlow.Infrastructure.Data;
+using OpsFlow.Infrastructure.Data.Seed;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<OpsFlowDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("OpsFlowDb")));
+builder.Services
+    .AddIdentityCore<AppUser>()
+    .AddRoles<IdentityRole<Guid>>()
+    .AddEntityFrameworkStores<OpsFlowDbContext>();
 
 var app = builder.Build();
 
