@@ -6,7 +6,7 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. Business APIs, authentication endpoints, workflow services, and Angular business screens are intentionally deferred to later PRs.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. Business case APIs, workflow services, dashboard endpoints, and Angular business screens are intentionally deferred to later PRs.
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are planned portfolio differentiators. The current foundation includes schema and deterministic seed data that support them, but it does not implement authentication endpoints, case APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
+These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, and backend authentication that support them, but it does not implement case APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
 
 ## Local Setup
 
@@ -92,17 +92,21 @@ The development seeder is deterministic and safe to run repeatedly against an al
 - 320 synthetic operations cases
 - Sample notes, status histories, assignment histories, approval requests, and audit logs
 
-No login endpoint or JWT issuing is implemented in PR-01A.
+PR-02 adds backend login and JWT issuing for these seeded demo users.
 
-## Demo Accounts
+## Demo Auth
 
-Demo accounts will be added with the authentication and authorization PR.
+The backend exposes `POST /api/auth/login` for seeded demo users and `GET /api/auth/me` for the authenticated profile. Login returns a JWT bearer access token containing user identity, email, display name, and role claims.
+
+Demo password for all accounts: `Password123!`
 
 | Role | Email | Purpose |
 | --- | --- | --- |
-| Analyst | TBD | Assigned case workflow |
-| Manager | TBD | Approval and reassignment workflow |
-| Admin | TBD | Full demo access |
+| Admin | admin@opsflow.local | Full demo access |
+| Manager | manager@opsflow.local | Approval and reassignment workflow |
+| Analyst | analyst1@opsflow.local | Assigned case workflow |
+| Analyst | analyst2@opsflow.local | Assigned case workflow |
+| Analyst | analyst3@opsflow.local | Assigned case workflow |
 
 ## Screenshots
 
