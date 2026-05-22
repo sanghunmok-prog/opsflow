@@ -11,6 +11,7 @@ namespace OpsFlow.Infrastructure.Data.Seed;
 public static class SeedDataGenerator
 {
     public const int CaseCount = 320;
+    public const string DemoPassword = "Password123!";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -265,6 +266,8 @@ public static class SeedDataGenerator
 
     private static List<AppUser> CreateUsers(DateTime nowUtc)
     {
+        var passwordHasher = new PasswordHasher<AppUser>();
+
         return UserSeeds.Select(seed => new AppUser
         {
             Id = StableGuid($"user:{seed.Email}"),
@@ -277,7 +280,13 @@ public static class SeedDataGenerator
             IsActive = true,
             CreatedAtUtc = nowUtc,
             UpdatedAtUtc = nowUtc
-        }).ToList();
+        })
+        .Select(user =>
+        {
+            user.PasswordHash = passwordHasher.HashPassword(user, DemoPassword);
+            return user;
+        })
+        .ToList();
     }
 
     private static List<IdentityRole<Guid>> CreateRoles()

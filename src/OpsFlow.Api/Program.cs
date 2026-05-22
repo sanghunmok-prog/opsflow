@@ -1,6 +1,13 @@
+using System.Security.Claims;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using OpsFlow.Application.Auth;
+using OpsFlow.Domain.Constants;
 using OpsFlow.Domain.Entities;
+using OpsFlow.Infrastructure.Auth;
 using OpsFlow.Infrastructure.Data;
 using OpsFlow.Infrastructure.Data.Seed;
 
@@ -12,6 +19,41 @@ builder.Services
     .AddIdentityCore<AppUser>()
     .AddRoles<IdentityRole<Guid>>()
     .AddEntityFrameworkStores<OpsFlowDbContext>();
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddControllers();
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
+            ?? throw new InvalidOperationException("JWT configuration is required.");
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtOptions.Audience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey)),
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(1),
+            NameClaimType = ClaimTypes.NameIdentifier,
+            RoleClaimType = ClaimTypes.Role
+        };
+    });
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(OpsFlowPolicies.RequireAdmin, policy =>
+        policy.RequireRole(OpsFlowRoles.Admin));
+    options.AddPolicy(OpsFlowPolicies.RequireManagerOrAdmin, policy =>
+        policy.RequireRole(OpsFlowRoles.Manager, OpsFlowRoles.Admin));
+    options.AddPolicy(OpsFlowPolicies.RequireAnalystOrManagerOrAdmin, policy =>
+        policy.RequireRole(OpsFlowRoles.Analyst, OpsFlowRoles.Manager, OpsFlowRoles.Admin));
+    options.AddPolicy(OpsFlowPolicies.RequireAuthenticatedUser, policy =>
+        policy.RequireAuthenticatedUser());
+});
 
 var app = builder.Build();
 
@@ -24,9 +66,12 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "OpsFlow.Api" }))
     .WithName("HealthCheck");
+app.MapControllers();
 
 app.Run();
 
