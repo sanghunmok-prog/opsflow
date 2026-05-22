@@ -6,7 +6,7 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. Business case APIs, workflow services, dashboard endpoints, and Angular business screens are intentionally deferred to later PRs.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. Case mutation workflow services, dashboard endpoints, and Angular business screens are intentionally deferred to later PRs.
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, and backend authentication that support them, but it does not implement case APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
+These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, and role-aware case read APIs that support them, but it does not implement case mutation APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
 
 ## Local Setup
 
@@ -108,6 +108,17 @@ Demo password for all accounts: `Password123!`
 | Analyst | analyst2@opsflow.local | Assigned case workflow |
 | Analyst | analyst3@opsflow.local | Assigned case workflow |
 
+## Case Read API
+
+Authenticated users can read cases through:
+
+- `GET /api/cases`
+- `GET /api/cases/{id}`
+
+`GET /api/cases` supports `page`, `pageSize`, `search`, `status`, `priority`, `caseTypeId`, `assignedToUserId`, `sortBy`, and `sortDirection`. Analysts are constrained server-side to their own assigned cases. Managers and Admins can read all cases and filter by assignee.
+
+These endpoints return DTOs only. They do not expose notes, assignment history, status history, approval actions, dashboard metrics, Identity internals, or case mutation behavior.
+
 ## Screenshots
 
 Screenshots will be added as the Angular workflow screens are implemented.
@@ -120,4 +131,4 @@ Screenshots will be added as the Angular workflow screens are implemented.
 - Demo script: [docs/demo-script.md](docs/demo-script.md)
 - Data model: [docs/data-model.md](docs/data-model.md)
 
-The database schema was introduced in PR-01 and corrected in PR-01A. API contracts and UI workflows will be implemented in later PRs.
+The database schema was introduced in PR-01 and corrected in PR-01A. Case read API contracts are available now; mutation workflows and UI screens will be implemented in later PRs.

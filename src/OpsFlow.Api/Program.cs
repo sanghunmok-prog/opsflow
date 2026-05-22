@@ -5,9 +5,12 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using OpsFlow.Application.Auth;
+using OpsFlow.Application.Cases;
 using OpsFlow.Domain.Constants;
 using OpsFlow.Domain.Entities;
+using OpsFlow.Api;
 using OpsFlow.Infrastructure.Auth;
+using OpsFlow.Infrastructure.Cases;
 using OpsFlow.Infrastructure.Data;
 using OpsFlow.Infrastructure.Data.Seed;
 
@@ -21,6 +24,9 @@ builder.Services
     .AddEntityFrameworkStores<OpsFlowDbContext>();
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddScoped<ICaseQueryService, EfCaseQueryService>();
 builder.Services.AddControllers();
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
