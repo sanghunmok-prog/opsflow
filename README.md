@@ -6,7 +6,7 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. Assignment, status, notes, approval, dashboard endpoints, and Angular business screens are intentionally deferred to later PRs.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. PR-05 adds the Angular authentication shell, demo login flow, protected routes, and role-aware navigation. Assignment, status, notes, approval, dashboard metrics, and Angular business workflow screens are intentionally deferred to later PRs.
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, and basic Manager/Admin case creation with SLA due dates. It does not implement assignment workflow, status workflow, notes APIs, approval workflow behavior, dashboard endpoints, or Angular business UI.
+These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, basic Manager/Admin case creation with SLA due dates, and an Angular authentication shell. It does not implement assignment workflow, status workflow, notes APIs, approval workflow behavior, dashboard metrics endpoints, or Angular case workflow UI.
 
 ## Local Setup
 
@@ -48,6 +48,7 @@ dotnet test OpsFlow.sln
 cd src/OpsFlow.Web
 npm install
 npm run build
+npm start
 cd ../..
 docker compose config
 ```
@@ -74,6 +75,15 @@ Run the API in development mode to apply any pending migrations and seed local d
 dotnet run --project src/OpsFlow.Api/OpsFlow.Api.csproj
 ```
 
+Run the Angular app with its local API proxy:
+
+```bash
+cd src/OpsFlow.Web
+npm start
+```
+
+The Angular development server proxies `/api` and `/health` to `http://localhost:5080`, so the API should be running on that backend URL for local login.
+
 The development connection string targets `localhost,1433` and database `OpsFlowDb`. Override it with standard ASP.NET Core configuration, for example:
 
 ```bash
@@ -98,15 +108,17 @@ PR-02 adds backend login and JWT issuing for these seeded demo users.
 
 The backend exposes `POST /api/auth/login` for seeded demo users and `GET /api/auth/me` for the authenticated profile. Login returns a JWT bearer access token containing user identity, email, display name, and role claims.
 
+The Angular app exposes `/login`, stores the demo JWT access token in local storage under `opsflow_access_token`, restores the current user with `/api/auth/me` after refresh, and protects `/dashboard` and `/cases`. The dashboard and cases pages are placeholders only until later PRs.
+
 Demo password for all accounts: `Password123!`
 
-| Role | Email | Purpose |
-| --- | --- | --- |
-| Admin | admin@opsflow.local | Full demo access |
-| Manager | manager@opsflow.local | Approval and reassignment workflow |
-| Analyst | analyst1@opsflow.local | Assigned case workflow |
-| Analyst | analyst2@opsflow.local | Assigned case workflow |
-| Analyst | analyst3@opsflow.local | Assigned case workflow |
+| Role    | Email                  | Purpose                            |
+| ------- | ---------------------- | ---------------------------------- |
+| Admin   | admin@opsflow.local    | Full demo access                   |
+| Manager | manager@opsflow.local  | Approval and reassignment workflow |
+| Analyst | analyst1@opsflow.local | Assigned case workflow             |
+| Analyst | analyst2@opsflow.local | Assigned case workflow             |
+| Analyst | analyst3@opsflow.local | Assigned case workflow             |
 
 ## Case API
 

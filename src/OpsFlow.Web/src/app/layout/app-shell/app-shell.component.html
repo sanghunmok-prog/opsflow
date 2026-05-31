@@ -1,0 +1,24 @@
+<div class="app-shell">
+  <header class="topbar">
+    <a class="brand" routerLink="/dashboard">OpsFlow</a>
+
+    <nav class="nav" aria-label="Primary navigation">
+      <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+      <a routerLink="/cases" routerLinkActive="active">{{ caseNavLabel() }}</a>
+    </nav>
+
+    @if (currentUser(); as user) {
+      <div class="user-menu">
+        <div class="user-summary">
+          <span>{{ user.displayName }}</span>
+          <small>{{ user.roles[0] }}</small>
+        </div>
+        <button type="button" (click)="logout()">Logout</button>
+      </div>
+    }
+  </header>
+
+  <main class="content">
+    <router-outlet />
+  </main>
+</div>
