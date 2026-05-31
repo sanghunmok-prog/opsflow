@@ -13,4 +13,5 @@ public sealed record CaseDetailDto(
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc,
     DateTime DueAtUtc,
+    bool IsOverdue,
     string RowVersion);

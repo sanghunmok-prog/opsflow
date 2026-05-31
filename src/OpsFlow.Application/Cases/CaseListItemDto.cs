@@ -9,4 +9,5 @@ public sealed record CaseListItemDto(
     string Status,
     UserSummaryDto? AssignedTo,
     DateTime CreatedAtUtc,
-    DateTime DueAtUtc);
+    DateTime DueAtUtc,
+    bool IsOverdue);

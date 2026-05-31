@@ -6,7 +6,7 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. Case mutation workflow services, dashboard endpoints, and Angular business screens are intentionally deferred to later PRs.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. Assignment, status, notes, approval, dashboard endpoints, and Angular business screens are intentionally deferred to later PRs.
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, and role-aware case read APIs that support them, but it does not implement case mutation APIs, SLA services, approval workflow behavior, audit services, dashboard endpoints, or Angular business UI.
+These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, and basic Manager/Admin case creation with SLA due dates. It does not implement assignment workflow, status workflow, notes APIs, approval workflow behavior, dashboard endpoints, or Angular business UI.
 
 ## Local Setup
 
@@ -108,16 +108,22 @@ Demo password for all accounts: `Password123!`
 | Analyst | analyst2@opsflow.local | Assigned case workflow |
 | Analyst | analyst3@opsflow.local | Assigned case workflow |
 
-## Case Read API
+## Case API
 
 Authenticated users can read cases through:
 
 - `GET /api/cases`
 - `GET /api/cases/{id}`
 
-`GET /api/cases` supports `page`, `pageSize`, `search`, `status`, `priority`, `caseTypeId`, `assignedToUserId`, `sortBy`, and `sortDirection`. Analysts are constrained server-side to their own assigned cases. Managers and Admins can read all cases and filter by assignee.
+Managers and Admins can create unassigned cases through:
 
-These endpoints return DTOs only. They do not expose notes, assignment history, status history, approval actions, dashboard metrics, Identity internals, or case mutation behavior.
+- `POST /api/cases`
+
+`POST /api/cases` accepts title, description, case type id, and priority only. The API sets `Status = New`, leaves `AssignedTo = null`, records the current user as creator, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
+
+`GET /api/cases` supports `page`, `pageSize`, `search`, `status`, `priority`, `caseTypeId`, `assignedToUserId`, `overdue`, `sortBy`, and `sortDirection`. Analysts are constrained server-side to their own assigned cases. Managers and Admins can read all cases and filter by assignee.
+
+These endpoints return DTOs only. They include query-time `isOverdue` and do not expose notes, assignment history, status history, approval actions, dashboard metrics, Identity internals, or workflow mutation behavior.
 
 ## Screenshots
 

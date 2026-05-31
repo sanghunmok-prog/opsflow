@@ -1,6 +1,6 @@
 # API Contract
 
-The API currently exposes health, authentication, and role-aware case read endpoints.
+The API currently exposes health, authentication, role-aware case read endpoints, and basic Manager/Admin case creation.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -9,8 +9,9 @@ The API currently exposes health, authentication, and role-aware case read endpo
 | GET | `/api/auth/me` | Returns the authenticated user profile and roles. |
 | GET | `/api/cases` | Returns a paginated, filtered, sorted, role-aware case queue. |
 | GET | `/api/cases/{id}` | Returns accessible case detail by id. |
+| POST | `/api/cases` | Creates a new unassigned case as Manager/Admin. |
 
-PR-03 implements backend case read APIs only. Workflow mutations, notes, assignment, approval, audit timeline, dashboard endpoints, and Angular business screens remain later PR scope.
+PR-04 implements backend case creation and SLA/overdue calculation only. Notes, assignment, status transition, approval, audit timeline endpoints, dashboard endpoints, and Angular business screens remain later PR scope.
 
 ## Case List
 
@@ -25,10 +26,13 @@ Supported query parameters:
 - `priority`: `Critical`, `High`, `Medium`, or `Low`
 - `caseTypeId`: case type id
 - `assignedToUserId`: Manager/Admin only unless it matches the current Analyst user id
+- `overdue`: `true` for open overdue cases, `false` for cases that are not overdue
 - `sortBy`: `caseNumber`, `createdAtUtc`, `dueAtUtc`, `priority`, or `status`
 - `sortDirection`: `asc` or `desc`
 
 Analysts are always constrained to `AssignedToUserId == currentUserId`. Managers and Admins can read all matching cases.
+
+List items include query-time `isOverdue`, calculated as `Status != Closed && nowUtc > dueAtUtc`.
 
 ## Case Detail
 
@@ -39,11 +43,36 @@ Analysts are always constrained to `AssignedToUserId == currentUserId`. Managers
 - Existing case outside Analyst assignment scope: `403`
 - Accessible case: `200`
 
-Detail responses include case metadata, case type summary, assigned user summary, created-by user summary, timestamps, due date, and base64 row version.
+Detail responses include case metadata, case type summary, assigned user summary, created-by user summary, timestamps, due date, query-time `isOverdue`, and base64 row version.
+
+## Case Create
+
+`POST /api/cases` requires the Manager or Admin role.
+
+Request body:
+
+```json
+{
+  "title": "Vendor onboarding exception",
+  "description": "Synthetic internal operations case.",
+  "caseTypeId": "00000000-0000-0000-0000-000000000000",
+  "priority": "High"
+}
+```
+
+Creation behavior:
+
+- Missing token: `401`
+- Analyst token: `403`
+- Invalid request: `400`
+- Missing case type: `404`
+- Missing active SLA rule: `422`
+- Success: `201`
+
+The API sets `Status = New`, leaves `AssignedTo = null`, records `CreatedBy` from the authenticated user, generates an `OPF-YYYY-####` case number, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
 
 ## Planned Contract Areas
 
-- SLA due date and overdue indicators
 - Notes and status workflow
 - Manager reassignment
 - Manager approval decisions
@@ -52,8 +81,8 @@ Detail responses include case metadata, case type summary, assigned user summary
 
 ## Error Handling Placeholder
 
-Case query validation currently returns simple `400` responses. Authorization failures use standard `401`/`403` behavior. Broader Problem Details and concurrency response documentation will be expanded when those behaviors are implemented.
+Case query and creation validation currently return simple `400` responses. Authorization failures use standard `401`/`403` behavior. Broader Problem Details and concurrency response documentation will be expanded when those behaviors are implemented.
 
 ## Current Boundary
 
-No case creation, notes, assignment mutation, status transition, approval, dashboard, export, notification, or Angular business UI endpoints are implemented in PR-03.
+No notes, assignment mutation, status transition, approval, dashboard, export, notification, or Angular business UI endpoints are implemented in PR-04.
