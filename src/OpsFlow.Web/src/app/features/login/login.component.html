@@ -1,0 +1,49 @@
+<main class="login-page">
+  <section class="login-panel" aria-labelledby="login-title">
+    <div class="login-copy">
+      <p class="eyebrow">OpsFlow</p>
+      <h1 id="login-title">Sign in</h1>
+      <p>Use a seeded demo account to access the internal workflow shell.</p>
+    </div>
+
+    <form class="login-form" [formGroup]="form" (ngSubmit)="login()">
+      <label>
+        Email
+        <input type="email" autocomplete="username" formControlName="email" />
+      </label>
+      @if (form.controls.email.touched && form.controls.email.invalid) {
+        <p class="field-error">Enter a valid email address.</p>
+      }
+
+      <label>
+        Password
+        <input type="password" autocomplete="current-password" formControlName="password" />
+      </label>
+      @if (form.controls.password.touched && form.controls.password.invalid) {
+        <p class="field-error">Password is required.</p>
+      }
+
+      @if (errorMessage()) {
+        <p class="form-error" role="alert">{{ errorMessage() }}</p>
+      }
+
+      <button class="primary-action" type="submit" [disabled]="isLoading()">
+        {{ isLoading() ? 'Signing in...' : 'Sign in' }}
+      </button>
+    </form>
+
+    <div class="demo-list" aria-label="Demo accounts">
+      @for (account of demoAccounts; track account.email) {
+        <button
+          type="button"
+          class="demo-button"
+          (click)="useDemoAccount(account)"
+          [disabled]="isLoading()"
+        >
+          <span>{{ account.label }}</span>
+          <small>{{ account.email }}</small>
+        </button>
+      }
+    </div>
+  </section>
+</main>
