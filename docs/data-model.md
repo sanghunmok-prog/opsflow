@@ -119,5 +119,5 @@ erDiagram
 - Pending approvals are constrained to one pending request per case.
 - History and audit relationships avoid cascade delete.
 - `Cases.RowVersion` is configured for SQL Server optimistic concurrency.
-- `IsOverdue` is not persisted; it will be calculated by query/DTO logic in a later PR.
+- `IsOverdue` is not persisted; it is calculated by query/DTO logic.
 - Approval requirement is not stored on `Cases`; later workflow logic derives it from High/Critical priority and case state.

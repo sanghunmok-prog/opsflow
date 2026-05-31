@@ -6,9 +6,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using OpsFlow.Application.Auth;
 using OpsFlow.Application.Cases;
+using OpsFlow.Application.Common;
 using OpsFlow.Domain.Constants;
 using OpsFlow.Domain.Entities;
 using OpsFlow.Api;
+using OpsFlow.Infrastructure;
 using OpsFlow.Infrastructure.Auth;
 using OpsFlow.Infrastructure.Cases;
 using OpsFlow.Infrastructure.Data;
@@ -26,7 +28,10 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptio
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICaseQueryService, EfCaseQueryService>();
+builder.Services.AddScoped<ICaseCommandService, EfCaseCommandService>();
+builder.Services.AddScoped<ISlaService, SlaService>();
 builder.Services.AddControllers();
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

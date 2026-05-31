@@ -17,6 +17,8 @@ OpsFlow uses EF Core with SQL Server for the relational workflow model. The sche
 
 Enums are stored as strings for SQL readability. Business timestamps use UTC fields with a `Utc` suffix. `Cases.RowVersion` is configured as a SQL Server `rowversion` concurrency token for later command endpoints.
 
+SLA due dates are calculated server-side from active `SlaRules` by case type and priority. Overdue state is calculated at query time and is not persisted as a case column.
+
 Development seeding is deterministic and generated at runtime, not through large `HasData` migration blocks.
 
 ## Architecture Decision

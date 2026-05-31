@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OpsFlow.Application.Auth;
 using OpsFlow.Application.Cases;
+using OpsFlow.Application.Common;
 using OpsFlow.Domain.Entities;
 using OpsFlow.Domain.Enums;
 using OpsFlow.Infrastructure.Data;
@@ -10,7 +11,8 @@ namespace OpsFlow.Infrastructure.Cases;
 
 public sealed class EfCaseQueryService(
     OpsFlowDbContext dbContext,
-    ICurrentUserService currentUser) : ICaseQueryService
+    ICurrentUserService currentUser,
+    IClock clock) : ICaseQueryService
 {
     private const int MaxPageSize = 100;
 
@@ -24,6 +26,7 @@ public sealed class EfCaseQueryService(
         var sortDirection = NormalizeSortDirection(query.SortDirection);
         var status = ParseEnum<CaseStatus>(query.Status, "status");
         var priority = ParseEnum<CasePriority>(query.Priority, "priority");
+        var nowUtc = DateTime.SpecifyKind(clock.UtcNow, DateTimeKind.Utc);
 
         var cases = ApplyAccessScope(dbContext.Cases.AsNoTracking(), query.AssignedToUserId);
 
@@ -56,6 +59,15 @@ public sealed class EfCaseQueryService(
             cases = cases.Where(x => x.AssignedToUserId == query.AssignedToUserId);
         }
 
+        if (query.Overdue is true)
+        {
+            cases = cases.Where(x => x.Status != CaseStatus.Closed && nowUtc > x.DueAtUtc);
+        }
+        else if (query.Overdue is false)
+        {
+            cases = cases.Where(x => x.Status == CaseStatus.Closed || nowUtc <= x.DueAtUtc);
+        }
+
         cases = ApplySort(cases, sortBy, sortDirection);
 
         var totalCount = await cases.CountAsync(cancellationToken);
@@ -73,7 +85,8 @@ public sealed class EfCaseQueryService(
                     ? null
                     : new CaseUserSummaryDto(x.AssignedToUser.Id, x.AssignedToUser.DisplayName),
                 x.CreatedAtUtc,
-                x.DueAtUtc))
+                x.DueAtUtc,
+                x.Status != CaseStatus.Closed && nowUtc > x.DueAtUtc))
             .ToListAsync(cancellationToken);
 
         return new PagedResult<CaseListItemDto>(
@@ -86,6 +99,7 @@ public sealed class EfCaseQueryService(
 
     public async Task<CaseDetailDto?> GetCaseAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var nowUtc = DateTime.SpecifyKind(clock.UtcNow, DateTimeKind.Utc);
         var opsCase = await dbContext.Cases
             .AsNoTracking()
             .Where(x => x.Id == id)
@@ -106,6 +120,7 @@ public sealed class EfCaseQueryService(
                 x.CreatedAtUtc,
                 x.UpdatedAtUtc,
                 x.DueAtUtc,
+                IsOverdue = x.Status != CaseStatus.Closed && nowUtc > x.DueAtUtc,
                 x.RowVersion
             })
             .SingleOrDefaultAsync(cancellationToken);
@@ -133,6 +148,7 @@ public sealed class EfCaseQueryService(
             opsCase.CreatedAtUtc,
             opsCase.UpdatedAtUtc,
             opsCase.DueAtUtc,
+            opsCase.IsOverdue,
             Convert.ToBase64String(opsCase.RowVersion));
     }
 

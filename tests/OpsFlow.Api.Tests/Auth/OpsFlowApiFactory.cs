@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using OpsFlow.Application.Common;
 using OpsFlow.Infrastructure.Data;
 using OpsFlow.Infrastructure.Data.Seed;
 
@@ -15,6 +16,7 @@ public sealed class OpsFlowApiFactory : WebApplicationFactory<Program>, IAsyncLi
     public const string JwtIssuer = "OpsFlow.Api.Tests";
     public const string JwtAudience = "OpsFlow.Api.Tests";
     public const string JwtSigningKey = "test-only-signing-key-change-me-minimum-32-chars";
+    public static readonly DateTime FixedNowUtc = new(2026, 5, 31, 12, 0, 0, DateTimeKind.Utc);
     private readonly string _databaseName = $"opsflow-auth-tests-{Guid.NewGuid()}";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -39,6 +41,8 @@ public sealed class OpsFlowApiFactory : WebApplicationFactory<Program>, IAsyncLi
 
             services.AddDbContext<OpsFlowDbContext>(options =>
                 options.UseInMemoryDatabase(_databaseName));
+            services.RemoveAll<IClock>();
+            services.AddSingleton<IClock>(new FixedClock(FixedNowUtc));
         });
     }
 
@@ -54,5 +58,10 @@ public sealed class OpsFlowApiFactory : WebApplicationFactory<Program>, IAsyncLi
     async Task IAsyncLifetime.DisposeAsync()
     {
         await base.DisposeAsync();
+    }
+
+    private sealed class FixedClock(DateTime utcNow) : IClock
+    {
+        public DateTime UtcNow { get; } = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
     }
 }
