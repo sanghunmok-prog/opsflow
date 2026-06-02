@@ -68,6 +68,12 @@ import { AnalystLookup, CaseDetail, CaseNote, CaseStatus, TimelineItem } from '.
             <span>SLA due</span>
             <p>{{ detail.dueAtUtc | date: 'medium' }}</p>
           </div>
+          @if (detail.closedAtUtc) {
+            <div>
+              <span>Closed at</span>
+              <p>{{ detail.closedAtUtc | date: 'medium' }}</p>
+            </div>
+          }
         </section>
 
         @if (canAssignCases()) {
@@ -168,6 +174,92 @@ import { AnalystLookup, CaseDetail, CaseNote, CaseStatus, TimelineItem } from '.
                   <button type="submit" class="primary" [disabled]="updatingStatus()">
                     {{ updatingStatus() ? 'Updating...' : 'Update Status' }}
                   </button>
+                </div>
+              </form>
+            }
+          </section>
+        }
+
+        @if (canShowApprovalPanel()) {
+          <section class="panel approval-panel" aria-label="Closure approval">
+            <header class="panel-header">
+              <h2>Closure Approval</h2>
+            </header>
+
+            @if (detail.approvalSummary; as approval) {
+              <div class="approval-summary">
+                <div>
+                  <span>Approval status</span>
+                  <p>{{ approval.status }}</p>
+                </div>
+                <div>
+                  <span>Requested by</span>
+                  <p>{{ approval.requestedBy.displayName }}</p>
+                </div>
+                <div>
+                  <span>Requested</span>
+                  <p>{{ approval.requestedAtUtc | date: 'medium' }}</p>
+                </div>
+                <div class="full">
+                  <span>Request reason</span>
+                  <p>{{ approval.requestReason }}</p>
+                </div>
+                @if (approval.decisionReason) {
+                  <div class="full">
+                    <span>Decision reason</span>
+                    <p>{{ approval.decisionReason }}</p>
+                  </div>
+                }
+              </div>
+            }
+
+            @if (canRequestClosure()) {
+              <form [formGroup]="closureRequestForm" (ngSubmit)="submitClosureRequest()" class="approval-form">
+                <label>
+                  <span>Request reason</span>
+                  <textarea formControlName="requestReason" rows="3" maxlength="1000"></textarea>
+                </label>
+
+                @if (closureValidationMessage()) {
+                  <p class="form-error">{{ closureValidationMessage() }}</p>
+                }
+                @if (closureSaveMessage()) {
+                  <p class="form-success" role="status">{{ closureSaveMessage() }}</p>
+                }
+                @if (closureSaveError()) {
+                  <p class="form-error" role="alert">{{ closureSaveError() }}</p>
+                }
+
+                <div class="form-actions">
+                  <button type="submit" class="primary" [disabled]="requestingClosure()">
+                    {{ requestingClosure() ? 'Requesting...' : 'Request Closure Approval' }}
+                  </button>
+                </div>
+              </form>
+            }
+
+            @if (canDecideApproval()) {
+              <form [formGroup]="approvalDecisionForm" class="approval-form">
+                <label>
+                  <span>Decision reason</span>
+                  <textarea formControlName="decisionReason" rows="3" maxlength="1000"></textarea>
+                </label>
+
+                @if (approvalValidationMessage()) {
+                  <p class="form-error">{{ approvalValidationMessage() }}</p>
+                }
+                @if (approvalSaveMessage()) {
+                  <p class="form-success" role="status">{{ approvalSaveMessage() }}</p>
+                }
+                @if (approvalSaveError()) {
+                  <p class="form-error" role="alert">{{ approvalSaveError() }}</p>
+                }
+
+                <div class="form-actions">
+                  <button type="button" class="primary" [disabled]="decidingApproval()" (click)="approveClosure()">
+                    {{ decidingApproval() ? 'Saving...' : 'Approve' }}
+                  </button>
+                  <button type="button" [disabled]="decidingApproval()" (click)="rejectClosure()">Reject</button>
                 </div>
               </form>
             }
@@ -365,6 +457,7 @@ import { AnalystLookup, CaseDetail, CaseNote, CaseStatus, TimelineItem } from '.
     .note-form,
     .assignment-form,
     .status-form,
+    .approval-form,
     label {
       display: grid;
       gap: 0.55rem;
@@ -404,23 +497,36 @@ import { AnalystLookup, CaseDetail, CaseNote, CaseStatus, TimelineItem } from '.
     }
 
     .assignment-panel,
-    .status-panel {
+    .status-panel,
+    .approval-panel {
       gap: 0.85rem;
     }
 
-    .assignment-current {
+    .assignment-current,
+    .approval-summary {
       display: grid;
       gap: 0.25rem;
     }
 
-    .assignment-current span {
+    .approval-summary {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.85rem;
+    }
+
+    .approval-summary .full {
+      grid-column: 1 / -1;
+    }
+
+    .assignment-current span,
+    .approval-summary span {
       color: #4a5661;
       font-size: 0.78rem;
       font-weight: 800;
       text-transform: uppercase;
     }
 
-    .assignment-current p {
+    .assignment-current p,
+    .approval-summary p {
       color: #26323d;
       font-weight: 750;
     }
@@ -533,7 +639,8 @@ import { AnalystLookup, CaseDetail, CaseNote, CaseStatus, TimelineItem } from '.
       }
 
       .metadata,
-      .content-grid {
+      .content-grid,
+      .approval-summary {
         grid-template-columns: 1fr;
       }
     }
@@ -557,6 +664,8 @@ export class CaseDetailComponent {
   readonly savingNote = signal(false);
   readonly assigningCase = signal(false);
   readonly updatingStatus = signal(false);
+  readonly requestingClosure = signal(false);
+  readonly decidingApproval = signal(false);
   readonly detailError = signal('');
   readonly analystsError = signal('');
   readonly notesError = signal('');
@@ -570,7 +679,35 @@ export class CaseDetailComponent {
   readonly statusValidationMessage = signal('');
   readonly statusSaveMessage = signal('');
   readonly statusSaveError = signal('');
+  readonly closureValidationMessage = signal('');
+  readonly closureSaveMessage = signal('');
+  readonly closureSaveError = signal('');
+  readonly approvalValidationMessage = signal('');
+  readonly approvalSaveMessage = signal('');
+  readonly approvalSaveError = signal('');
   readonly canAssignCases = computed(() => this.authService.hasAnyRole(['Manager', 'Admin']));
+  readonly canShowApprovalPanel = computed(() => this.canRequestClosure() || !!this.caseDetail()?.approvalSummary);
+  readonly canRequestClosure = computed(() => {
+    const detail = this.caseDetail();
+    if (!detail || detail.status !== 'Resolved' || !this.isHighPriorityApprovalCase(detail)) {
+      return false;
+    }
+
+    if (this.authService.hasAnyRole(['Manager', 'Admin'])) {
+      return true;
+    }
+
+    const currentUser = this.authService.currentUser();
+    return this.authService.hasRole('Analyst') && detail.assignedTo?.id === currentUser?.id;
+  });
+  readonly canDecideApproval = computed(() => {
+    const detail = this.caseDetail();
+    return (
+      this.authService.hasAnyRole(['Manager', 'Admin']) &&
+      detail?.status === 'PendingApproval' &&
+      detail.approvalSummary?.status === 'Pending'
+    );
+  });
   readonly canShowStatusPanel = computed(() => {
     const detail = this.caseDetail();
     if (!detail) {
@@ -609,6 +746,14 @@ export class CaseDetailComponent {
   readonly statusForm = this.fb.nonNullable.group({
     targetStatus: ['', [Validators.required]],
     reason: ['', [Validators.required, Validators.maxLength(1000)]],
+  });
+
+  readonly closureRequestForm = this.fb.nonNullable.group({
+    requestReason: ['', [Validators.required, Validators.maxLength(1000)]],
+  });
+
+  readonly approvalDecisionForm = this.fb.nonNullable.group({
+    decisionReason: ['', [Validators.maxLength(1000)]],
   });
 
   private readonly caseId = this.route.snapshot.paramMap.get('id') ?? '';
@@ -759,6 +904,69 @@ export class CaseDetailComponent {
       });
   }
 
+  submitClosureRequest(): void {
+    this.closureValidationMessage.set('');
+    this.closureSaveMessage.set('');
+    this.closureSaveError.set('');
+
+    const detail = this.caseDetail();
+    const requestReason = this.closureRequestForm.controls.requestReason.value.trim();
+
+    if (!detail) {
+      this.closureValidationMessage.set('Case detail is required.');
+      return;
+    }
+
+    if (!requestReason) {
+      this.closureValidationMessage.set('Request reason is required.');
+      return;
+    }
+
+    if (requestReason.length > 1000) {
+      this.closureValidationMessage.set('Request reason must be 1000 characters or fewer.');
+      return;
+    }
+
+    this.requestingClosure.set(true);
+    this.api
+      .requestClosure(this.caseId, {
+        requestReason,
+        rowVersion: detail.rowVersion,
+      })
+      .pipe(
+        finalize(() => this.requestingClosure.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: () => {
+          this.closureRequestForm.reset({ requestReason: '' });
+          this.closureSaveMessage.set('Closure approval requested.');
+          this.loadDetail();
+          this.loadNotesAndTimeline();
+        },
+        error: (error: HttpErrorResponse) => {
+          this.closureSaveError.set(this.approvalErrorMessage(error));
+        },
+      });
+  }
+
+  approveClosure(): void {
+    const decisionReason = this.approvalDecisionForm.controls.decisionReason.value.trim();
+    this.submitApprovalDecision('approve', decisionReason || null);
+  }
+
+  rejectClosure(): void {
+    const decisionReason = this.approvalDecisionForm.controls.decisionReason.value.trim();
+    this.approvalValidationMessage.set('');
+
+    if (!decisionReason) {
+      this.approvalValidationMessage.set('Decision reason is required for rejection.');
+      return;
+    }
+
+    this.submitApprovalDecision('reject', decisionReason);
+  }
+
   actionLabel(action: TimelineItem['action']): string {
     if (action === 'CaseCreated') {
       return 'Case Created';
@@ -774,6 +982,18 @@ export class CaseDetailComponent {
 
     if (action === 'CaseReopened') {
       return 'Case Reopened';
+    }
+
+    if (action === 'ClosureRequested') {
+      return 'Closure Requested';
+    }
+
+    if (action === 'ApprovalApproved') {
+      return 'Closure Approved';
+    }
+
+    if (action === 'ApprovalRejected') {
+      return 'Closure Rejected';
     }
 
     return 'Note Added';
@@ -898,6 +1118,76 @@ export class CaseDetailComponent {
     }
 
     return 'Status could not be updated. Try again.';
+  }
+
+  private submitApprovalDecision(action: 'approve' | 'reject', decisionReason: string | null): void {
+    this.approvalValidationMessage.set('');
+    this.approvalSaveMessage.set('');
+    this.approvalSaveError.set('');
+
+    const detail = this.caseDetail();
+    const approvalId = detail?.approvalSummary?.approvalId;
+    if (!detail || !approvalId) {
+      this.approvalValidationMessage.set('Pending approval is required.');
+      return;
+    }
+
+    if (decisionReason && decisionReason.length > 1000) {
+      this.approvalValidationMessage.set('Decision reason must be 1000 characters or fewer.');
+      return;
+    }
+
+    const request = {
+      decisionReason,
+      rowVersion: detail.rowVersion,
+    };
+    const operation =
+      action === 'approve'
+        ? this.api.approveApproval(approvalId, request)
+        : this.api.rejectApproval(approvalId, request);
+
+    this.decidingApproval.set(true);
+    operation
+      .pipe(
+        finalize(() => this.decidingApproval.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: () => {
+          this.approvalDecisionForm.reset({ decisionReason: '' });
+          this.approvalSaveMessage.set(action === 'approve' ? 'Closure approved.' : 'Closure rejected.');
+          this.loadDetail();
+          this.loadNotesAndTimeline();
+        },
+        error: (error: HttpErrorResponse) => {
+          this.approvalSaveError.set(this.approvalErrorMessage(error));
+        },
+      });
+  }
+
+  private approvalErrorMessage(error: HttpErrorResponse): string {
+    if (error.status === 409) {
+      return 'This case or approval was updated by another user. Please refresh.';
+    }
+
+    const serverMessage = error.error?.message;
+    if (typeof serverMessage === 'string' && serverMessage.trim()) {
+      return serverMessage;
+    }
+
+    if (error.status === 403) {
+      return 'You do not have permission to manage this approval.';
+    }
+
+    if (error.status === 404) {
+      return 'Approval or case was not found.';
+    }
+
+    return 'Approval action could not be saved. Try again.';
+  }
+
+  private isHighPriorityApprovalCase(detail: CaseDetail): boolean {
+    return detail.priority === 'High' || detail.priority === 'Critical';
   }
 
   private managerTransitions(detail: CaseDetail): CaseStatus[] {

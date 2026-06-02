@@ -37,6 +37,9 @@ public sealed class EfCaseTimelineService(
                     x.Action == AuditAction.NoteAdded ||
                     x.Action == AuditAction.Assigned ||
                     x.Action == AuditAction.StatusChanged ||
+                    x.Action == AuditAction.ClosureRequested ||
+                    x.Action == AuditAction.ApprovalApproved ||
+                    x.Action == AuditAction.ApprovalRejected ||
                     x.Action == AuditAction.CaseReopened))
             .OrderBy(x => x.CreatedAtUtc)
             .ThenBy(x => x.Id)
@@ -109,6 +112,21 @@ public sealed class EfCaseTimelineService(
             return "Case reopened";
         }
 
+        if (action == AuditAction.ClosureRequested)
+        {
+            return AppendReason("Closure approval requested", TryReadApprovalMetadata(metadataJson)?.RequestReason);
+        }
+
+        if (action == AuditAction.ApprovalApproved)
+        {
+            return AppendReason("Closure approved", TryReadApprovalMetadata(metadataJson)?.DecisionReason);
+        }
+
+        if (action == AuditAction.ApprovalRejected)
+        {
+            return AppendReason("Closure rejected", TryReadApprovalMetadata(metadataJson)?.DecisionReason);
+        }
+
         var metadata = TryReadAssignmentMetadata(metadataJson);
         if (metadata?.ToUserId is not { } toUserId ||
             !usersById.TryGetValue(toUserId, out var toDisplayName))
@@ -159,7 +177,31 @@ public sealed class EfCaseTimelineService(
         }
     }
 
+    private static ApprovalMetadata? TryReadApprovalMetadata(string? metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ApprovalMetadata>(metadataJson, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string AppendReason(string description, string? reason)
+    {
+        return string.IsNullOrWhiteSpace(reason) ? description : $"{description}: {reason}";
+    }
+
     private sealed record AssignmentMetadata(Guid? FromUserId, Guid? ToUserId, string? Reason);
 
     private sealed record StatusMetadata(string? FromStatus, string? ToStatus, string? Reason);
+
+    private sealed record ApprovalMetadata(string? RequestReason, string? DecisionReason);
 }

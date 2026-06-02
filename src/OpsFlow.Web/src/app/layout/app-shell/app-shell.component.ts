@@ -17,6 +17,7 @@ export class AppShellComponent {
   readonly caseNavLabel = computed(() =>
     this.authService.hasRole('Analyst') ? 'My Cases' : 'Cases',
   );
+  readonly canManageApprovals = computed(() => this.authService.hasAnyRole(['Manager', 'Admin']));
 
   logout(): void {
     this.authService.logout();

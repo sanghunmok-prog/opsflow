@@ -178,4 +178,91 @@ describe('CaseApiService', () => {
     expect(request.request.method).toBe('GET');
     request.flush([]);
   });
+
+  it('posts closure request with reason and rowVersion', () => {
+    service
+      .requestClosure('case-1', {
+        requestReason: 'Work is complete.',
+        rowVersion: 'AAAA',
+      })
+      .subscribe();
+
+    const request = httpMock.expectOne('/api/cases/case-1/closure-request');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({
+      requestReason: 'Work is complete.',
+      rowVersion: 'AAAA',
+    });
+    request.flush({
+      id: 'approval-1',
+      caseId: 'case-1',
+      caseNumber: 'OPF-2026-0001',
+      caseTitle: 'Vendor exception',
+      priority: 'High',
+      caseStatus: 'PendingApproval',
+      approvalStatus: 'Pending',
+      requestReason: 'Work is complete.',
+      requestedBy: { id: 'user-1', displayName: 'Demo Analyst' },
+      requestedAtUtc: '2026-06-01T00:00:00Z',
+      rowVersion: 'AAAB',
+    });
+  });
+
+  it('gets pending approvals with paging params', () => {
+    service.getPendingApprovals(2, 10).subscribe();
+
+    const request = httpMock.expectOne(
+      (candidate) =>
+        candidate.url === '/api/approvals/pending' &&
+        candidate.params.get('page') === '2' &&
+        candidate.params.get('pageSize') === '10',
+    );
+    expect(request.request.method).toBe('GET');
+    request.flush({ items: [], page: 2, pageSize: 10, totalCount: 0, totalPages: 0 });
+  });
+
+  it('posts approve and reject approval requests', () => {
+    service.approveApproval('approval-1', { decisionReason: null, rowVersion: 'AAAA' }).subscribe();
+    service
+      .rejectApproval('approval-2', {
+        decisionReason: 'More review is required.',
+        rowVersion: 'AAAB',
+      })
+      .subscribe();
+
+    const approveRequest = httpMock.expectOne('/api/approvals/approval-1/approve');
+    expect(approveRequest.request.method).toBe('POST');
+    expect(approveRequest.request.body).toEqual({ decisionReason: null, rowVersion: 'AAAA' });
+    approveRequest.flush({
+      approvalId: 'approval-1',
+      caseId: 'case-1',
+      caseNumber: 'OPF-2026-0001',
+      caseTitle: 'Vendor exception',
+      approvalStatus: 'Approved',
+      caseStatus: 'Closed',
+      decisionReason: null,
+      reviewedBy: { id: 'manager-1', displayName: 'Demo Manager' },
+      decisionAtUtc: '2026-06-01T00:00:00Z',
+      rowVersion: 'AAAC',
+    });
+
+    const rejectRequest = httpMock.expectOne('/api/approvals/approval-2/reject');
+    expect(rejectRequest.request.method).toBe('POST');
+    expect(rejectRequest.request.body).toEqual({
+      decisionReason: 'More review is required.',
+      rowVersion: 'AAAB',
+    });
+    rejectRequest.flush({
+      approvalId: 'approval-2',
+      caseId: 'case-2',
+      caseNumber: 'OPF-2026-0002',
+      caseTitle: 'Vendor exception',
+      approvalStatus: 'Rejected',
+      caseStatus: 'InReview',
+      decisionReason: 'More review is required.',
+      reviewedBy: { id: 'manager-1', displayName: 'Demo Manager' },
+      decisionAtUtc: '2026-06-01T00:00:00Z',
+      rowVersion: 'AAAD',
+    });
+  });
 });

@@ -4,6 +4,10 @@ import { Observable } from 'rxjs';
 
 import {
   AnalystLookup,
+  ApprovalDecisionRequest,
+  ApprovalDecisionResult,
+  ApprovalQueueItem,
+  ApprovalRequestResult,
   AssignCaseRequest,
   CaseListItem,
   CaseListQuery,
@@ -14,6 +18,7 @@ import {
   CreateCaseRequest,
   CreateCaseResponse,
   PagedResult,
+  RequestClosureRequest,
   TimelineItem,
   UpdateCaseStatusRequest,
 } from './case.models';
@@ -42,6 +47,30 @@ export class CaseApiService {
 
   updateStatus(caseId: string, request: UpdateCaseStatusRequest): Observable<CaseDetail> {
     return this.http.patch<CaseDetail>(`/api/cases/${caseId}/status`, request);
+  }
+
+  requestClosure(caseId: string, request: RequestClosureRequest): Observable<ApprovalRequestResult> {
+    return this.http.post<ApprovalRequestResult>(`/api/cases/${caseId}/closure-request`, request);
+  }
+
+  getPendingApprovals(page = 1, pageSize = 20): Observable<PagedResult<ApprovalQueueItem>> {
+    return this.http.get<PagedResult<ApprovalQueueItem>>('/api/approvals/pending', {
+      params: new HttpParams().set('page', page).set('pageSize', pageSize),
+    });
+  }
+
+  approveApproval(
+    approvalId: string,
+    request: ApprovalDecisionRequest,
+  ): Observable<ApprovalDecisionResult> {
+    return this.http.post<ApprovalDecisionResult>(`/api/approvals/${approvalId}/approve`, request);
+  }
+
+  rejectApproval(
+    approvalId: string,
+    request: ApprovalDecisionRequest,
+  ): Observable<ApprovalDecisionResult> {
+    return this.http.post<ApprovalDecisionResult>(`/api/approvals/${approvalId}/reject`, request);
   }
 
   getAnalysts(): Observable<AnalystLookup[]> {

@@ -266,6 +266,10 @@ Goal:
 
 Implement High/Critical closure approval.
 
+Status:
+
+- Implemented in this PR-10 change.
+
 Scope:
 
 - closure request

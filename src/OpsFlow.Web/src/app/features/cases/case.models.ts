@@ -60,6 +60,7 @@ export interface CreateCaseResponse {
   createdAtUtc: string;
   updatedAtUtc: string;
   dueAtUtc: string;
+  closedAtUtc?: string | null;
   isOverdue: boolean;
   rowVersion: string;
 }
@@ -77,8 +78,10 @@ export interface CaseDetail {
   createdAtUtc: string;
   updatedAtUtc: string;
   dueAtUtc: string;
+  closedAtUtc?: string | null;
   isOverdue: boolean;
   rowVersion: string;
+  approvalSummary?: ApprovalSummary | null;
 }
 
 export interface CaseNote {
@@ -112,13 +115,86 @@ export interface AnalystLookup {
 
 export interface TimelineItem {
   id: string;
-  action: 'CaseCreated' | 'NoteAdded' | 'Assigned' | 'StatusChanged' | 'CaseReopened';
+  action:
+    | 'CaseCreated'
+    | 'NoteAdded'
+    | 'Assigned'
+    | 'StatusChanged'
+    | 'ClosureRequested'
+    | 'ApprovalApproved'
+    | 'ApprovalRejected'
+    | 'CaseReopened';
   actor: UserSummary | null;
   createdAtUtc: string;
   description: string;
 }
 
+export interface ApprovalSummary {
+  approvalId: string;
+  status: ApprovalStatus;
+  requestReason: string;
+  requestedBy: UserSummary;
+  requestedAtUtc: string;
+  decisionReason: string | null;
+  reviewedBy: UserSummary | null;
+  decisionAtUtc: string | null;
+}
+
+export interface RequestClosureRequest {
+  requestReason: string;
+  rowVersion: string;
+}
+
+export interface ApprovalDecisionRequest {
+  decisionReason?: string | null;
+  rowVersion?: string | null;
+}
+
+export interface ApprovalRequestResult {
+  id: string;
+  caseId: string;
+  caseNumber: string;
+  caseTitle: string;
+  priority: CasePriority;
+  caseStatus: CaseStatus;
+  approvalStatus: ApprovalStatus;
+  requestReason: string;
+  requestedBy: UserSummary;
+  requestedAtUtc: string;
+  rowVersion: string;
+}
+
+export interface ApprovalQueueItem {
+  id: string;
+  caseId: string;
+  caseNumber: string;
+  caseTitle: string;
+  priority: CasePriority;
+  caseStatus: CaseStatus;
+  requestReason: string;
+  requestedBy: UserSummary;
+  requestedAtUtc: string;
+  assignedTo: UserSummary | null;
+  dueAtUtc: string;
+  isOverdue: boolean;
+  rowVersion: string;
+}
+
+export interface ApprovalDecisionResult {
+  approvalId: string;
+  caseId: string;
+  caseNumber: string;
+  caseTitle: string;
+  approvalStatus: ApprovalStatus;
+  caseStatus: CaseStatus;
+  decisionReason: string | null;
+  reviewedBy: UserSummary;
+  decisionAtUtc: string;
+  rowVersion: string;
+}
+
 export type CasePriority = 'Low' | 'Medium' | 'High' | 'Critical';
+export type ApprovalStatus = 'Pending' | 'Approved' | 'Rejected';
 export type CaseStatus =
   | 'New'
   | 'Assigned'
