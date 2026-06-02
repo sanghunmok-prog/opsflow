@@ -15,6 +15,7 @@ import {
   CreateCaseResponse,
   PagedResult,
   TimelineItem,
+  UpdateCaseStatusRequest,
 } from './case.models';
 
 @Injectable({ providedIn: 'root' })
@@ -37,6 +38,10 @@ export class CaseApiService {
 
   assignCase(caseId: string, request: AssignCaseRequest): Observable<CaseDetail> {
     return this.http.patch<CaseDetail>(`/api/cases/${caseId}/assign`, request);
+  }
+
+  updateStatus(caseId: string, request: UpdateCaseStatusRequest): Observable<CaseDetail> {
+    return this.http.patch<CaseDetail>(`/api/cases/${caseId}/status`, request);
   }
 
   getAnalysts(): Observable<AnalystLookup[]> {

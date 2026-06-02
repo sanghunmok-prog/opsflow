@@ -134,21 +134,6 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
     }
 
     [Fact]
-    public async Task Generic_status_endpoint_is_not_added()
-    {
-        var caseId = await GetAnyCaseIdAsync();
-        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
-
-        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/status", new
-        {
-            status = "Assigned",
-            reason = "Out of scope for PR-08."
-        });
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
     public async Task Analyst_cannot_create_case()
     {
         var caseTypeId = await GetAnyCaseTypeIdAsync();
@@ -551,6 +536,392 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         Assert.Contains(timeline, x =>
             x.Action == nameof(AuditAction.Assigned) &&
             x.Description == "Assigned to Alex Analyst");
+    }
+
+    [Fact]
+    public async Task Update_status_without_token_returns_unauthorized()
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-09 unauth status",
+            caseTypeId,
+            createdById,
+            CaseStatus.Assigned,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10),
+            analystId);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+
+        var response = await factory.CreateClient()
+            .PatchAsJsonAsync($"/api/cases/{caseId}/status", StatusBody(CaseStatus.InReview, rowVersion));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unassigned_analyst_cannot_update_status()
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-09 unassigned analyst",
+            caseTypeId,
+            createdById,
+            CaseStatus.Assigned,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10));
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.InReview, rowVersion));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Assigned_analyst_can_update_status_and_creates_history_audit()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-09 analyst status",
+            caseTypeId,
+            createdById,
+            CaseStatus.Assigned,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10),
+            analystId);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.InReview, rowVersion, "  Started review after assignment.  "));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<CaseDetailBody>();
+        Assert.NotNull(detail);
+        Assert.Equal(nameof(CaseStatus.InReview), detail.Status);
+        Assert.NotEqual(rowVersion, detail.RowVersion);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var opsCase = await dbContext.Cases.SingleAsync(x => x.Id == caseId);
+        Assert.Equal(CaseStatus.InReview, opsCase.Status);
+
+        var statusHistory = await dbContext.StatusHistories.SingleAsync(x =>
+            x.CaseId == caseId &&
+            x.FromStatus == CaseStatus.Assigned &&
+            x.ToStatus == CaseStatus.InReview);
+        Assert.Equal(analystId, statusHistory.ChangedByUserId);
+        Assert.Equal("Started review after assignment.", statusHistory.Reason);
+
+        var auditLog = await dbContext.AuditLogs.SingleAsync(x =>
+            x.EntityType == "Case" &&
+            x.EntityId == caseId &&
+            x.Action == AuditAction.StatusChanged);
+        Assert.Equal(analystId, auditLog.ActorUserId);
+        Assert.Contains(nameof(CaseStatus.Assigned), auditLog.MetadataJson);
+        Assert.Contains(nameof(CaseStatus.InReview), auditLog.MetadataJson);
+    }
+
+    [Theory]
+    [InlineData("manager@opsflow.local")]
+    [InlineData("admin@opsflow.local")]
+    public async Task Manager_and_admin_can_update_status(string email)
+    {
+        var managerId = await GetUserIdAsync("manager@opsflow.local");
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            $"PR-09 status {email}",
+            caseTypeId,
+            managerId,
+            CaseStatus.InReview,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10),
+            analystId);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync(email);
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.WaitingInfo, rowVersion));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(nameof(CaseStatus.WaitingInfo), (await ReadDetailAsync(response)).Status);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Missing_or_empty_status_reason_returns_bad_request(string? reason)
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Assigned);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            new { targetStatus = "InReview", reason, rowVersion });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Missing_status_row_version_returns_bad_request()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Assigned);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/status", new
+        {
+            targetStatus = "InReview",
+            reason = "Started review."
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("NotAStatus")]
+    [InlineData("1")]
+    public async Task Invalid_target_status_returns_bad_request(string targetStatus)
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Assigned);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/status", new
+        {
+            targetStatus,
+            reason = "Started review.",
+            rowVersion
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Same_status_transition_returns_bad_request()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Assigned);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.Assigned, rowVersion));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Missing_case_status_update_returns_not_found()
+    {
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{Guid.NewGuid()}/status",
+            StatusBody(CaseStatus.InReview, Convert.ToBase64String(Guid.NewGuid().ToByteArray())));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(CaseStatus.Assigned, CaseStatus.InReview)]
+    [InlineData(CaseStatus.InReview, CaseStatus.WaitingInfo)]
+    [InlineData(CaseStatus.WaitingInfo, CaseStatus.InReview)]
+    [InlineData(CaseStatus.InReview, CaseStatus.Resolved)]
+    public async Task Transition_matrix_allows_expected_workflow_steps(CaseStatus fromStatus, CaseStatus toStatus)
+    {
+        var caseId = await CreateStatusTestCaseAsync(fromStatus);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(toStatus, rowVersion));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(toStatus.ToString(), (await ReadDetailAsync(response)).Status);
+    }
+
+    [Theory]
+    [InlineData(CasePriority.Low)]
+    [InlineData(CasePriority.Medium)]
+    public async Task Manager_can_close_resolved_low_and_medium_cases(CasePriority priority)
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Resolved, priority: priority);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.Closed, rowVersion));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(nameof(CaseStatus.Closed), (await ReadDetailAsync(response)).Status);
+    }
+
+    [Theory]
+    [InlineData(CasePriority.High)]
+    [InlineData(CasePriority.Critical)]
+    public async Task Resolved_high_and_critical_closure_is_blocked_until_approval_workflow(CasePriority priority)
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Resolved, priority: priority);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.Closed, rowVersion));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        Assert.False(await dbContext.ApprovalRequests.AnyAsync(x => x.CaseId == caseId));
+    }
+
+    [Fact]
+    public async Task Closed_case_can_be_reopened_by_manager_and_creates_reopen_audit()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Closed, priority: CasePriority.Low);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.Reopened, rowVersion, "Reopening for follow-up."));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(nameof(CaseStatus.Reopened), (await ReadDetailAsync(response)).Status);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var auditLog = await dbContext.AuditLogs.SingleAsync(x =>
+            x.EntityType == "Case" &&
+            x.EntityId == caseId &&
+            x.Action == AuditAction.CaseReopened);
+        Assert.Contains("Reopening for follow-up.", auditLog.MetadataJson);
+    }
+
+    [Fact]
+    public async Task Analyst_cannot_close_or_reopen_cases()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var resolvedCaseId = await CreateStatusTestCaseAsync(
+            CaseStatus.Resolved,
+            assignedToUserId: analystId,
+            priority: CasePriority.Low);
+        var closedCaseId = await CreateStatusTestCaseAsync(
+            CaseStatus.Closed,
+            assignedToUserId: analystId,
+            priority: CasePriority.Low);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var closeResponse = await client.PatchAsJsonAsync(
+            $"/api/cases/{resolvedCaseId}/status",
+            StatusBody(CaseStatus.Closed, await GetCaseRowVersionAsync(resolvedCaseId)));
+        var reopenResponse = await client.PatchAsJsonAsync(
+            $"/api/cases/{closedCaseId}/status",
+            StatusBody(CaseStatus.Reopened, await GetCaseRowVersionAsync(closedCaseId)));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, closeResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, reopenResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task New_to_assigned_via_status_endpoint_is_blocked()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.New);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.Assigned, rowVersion));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Transition_to_pending_approval_is_blocked_in_pr09()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Resolved, priority: CasePriority.High);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.PendingApproval, rowVersion));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        Assert.False(await dbContext.ApprovalRequests.AnyAsync(x => x.CaseId == caseId));
+    }
+
+    [Fact]
+    public async Task Stale_status_row_version_returns_conflict()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Assigned);
+        var staleRowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+        var firstResponse = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.InReview, staleRowVersion));
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+
+        var staleResponse = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.WaitingInfo, staleRowVersion));
+
+        Assert.Equal(HttpStatusCode.Conflict, staleResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Timeline_includes_status_changed_after_transition()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Assigned);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+        var updateResponse = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.InReview, rowVersion));
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var timeline = await response.Content.ReadFromJsonAsync<IReadOnlyList<CaseTimelineItemBody>>();
+        Assert.NotNull(timeline);
+        Assert.Contains(timeline, x =>
+            x.Action == nameof(AuditAction.StatusChanged) &&
+            x.Description == "Status changed from Assigned to InReview");
+    }
+
+    [Fact]
+    public async Task Timeline_includes_case_reopened_after_reopen()
+    {
+        var caseId = await CreateStatusTestCaseAsync(CaseStatus.Closed, priority: CasePriority.Low);
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+        var updateResponse = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/status",
+            StatusBody(CaseStatus.Reopened, rowVersion));
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var timeline = await response.Content.ReadFromJsonAsync<IReadOnlyList<CaseTimelineItemBody>>();
+        Assert.NotNull(timeline);
+        Assert.Contains(timeline, x =>
+            x.Action == nameof(AuditAction.CaseReopened) &&
+            x.Description == "Case reopened");
     }
 
     [Fact]
@@ -1147,7 +1518,8 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         Guid createdByUserId,
         CaseStatus status,
         DateTime dueAtUtc,
-        Guid? assignedToUserId = null)
+        Guid? assignedToUserId = null,
+        CasePriority priority = CasePriority.High)
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
@@ -1159,17 +1531,47 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
             Title = title,
             Description = "Synthetic internal operations case for PR-04 tests.",
             CaseTypeId = caseTypeId,
-            Priority = CasePriority.High,
+            Priority = priority,
             Status = status,
             AssignedToUserId = assignedToUserId,
             CreatedByUserId = createdByUserId,
             DueAtUtc = dueAtUtc,
             ClosedAtUtc = status == CaseStatus.Closed ? OpsFlowApiFactory.FixedNowUtc : null,
             CreatedAtUtc = OpsFlowApiFactory.FixedNowUtc.AddHours(-2),
-            UpdatedAtUtc = OpsFlowApiFactory.FixedNowUtc.AddHours(-1)
+            UpdatedAtUtc = OpsFlowApiFactory.FixedNowUtc.AddHours(-1),
+            RowVersion = Guid.NewGuid().ToByteArray()
         });
         await dbContext.SaveChangesAsync();
         return id;
+    }
+
+    private async Task<Guid> CreateStatusTestCaseAsync(
+        CaseStatus status,
+        Guid? assignedToUserId = null,
+        CasePriority priority = CasePriority.High)
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        return await CreateDirectCaseAsync(
+            $"PR-09 {status} {Guid.NewGuid():N}",
+            caseTypeId,
+            createdById,
+            status,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10),
+            assignedToUserId,
+            priority);
+    }
+
+    private async Task<string> GetCaseRowVersionAsync(Guid caseId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var rowVersion = await dbContext.Cases
+            .Where(x => x.Id == caseId)
+            .Select(x => x.RowVersion)
+            .SingleAsync();
+
+        return Convert.ToBase64String(rowVersion);
     }
 
     private async Task<Guid> CreateInactiveAnalystAsync()
@@ -1238,6 +1640,16 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         reason
     };
 
+    private static object StatusBody(
+        CaseStatus targetStatus,
+        string rowVersion,
+        string reason = "Status updated for workflow progress.") => new
+    {
+        targetStatus = targetStatus.ToString(),
+        reason,
+        rowVersion
+    };
+
     private sealed record LoginResponseBody(
         [property: JsonPropertyName("accessToken")] string AccessToken);
 
@@ -1269,7 +1681,8 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         [property: JsonPropertyName("createdAtUtc")] DateTime CreatedAtUtc,
         [property: JsonPropertyName("updatedAtUtc")] DateTime UpdatedAtUtc,
         [property: JsonPropertyName("dueAtUtc")] DateTime DueAtUtc,
-        [property: JsonPropertyName("isOverdue")] bool IsOverdue);
+        [property: JsonPropertyName("isOverdue")] bool IsOverdue,
+        [property: JsonPropertyName("rowVersion")] string RowVersion);
 
     private sealed record CaseNoteBody(
         [property: JsonPropertyName("id")] Guid Id,

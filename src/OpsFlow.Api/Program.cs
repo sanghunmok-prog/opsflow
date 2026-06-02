@@ -33,6 +33,7 @@ builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICaseQueryService, EfCaseQueryService>();
 builder.Services.AddScoped<ICaseCommandService, EfCaseCommandService>();
 builder.Services.AddScoped<ICaseAssignmentService, EfCaseAssignmentService>();
+builder.Services.AddScoped<ICaseStatusService, EfCaseStatusService>();
 builder.Services.AddScoped<ICaseAccessService, EfCaseAccessService>();
 builder.Services.AddScoped<ICaseNoteService, EfCaseNoteService>();
 builder.Services.AddScoped<ICaseTimelineService, EfCaseTimelineService>();

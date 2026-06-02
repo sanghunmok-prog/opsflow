@@ -1,6 +1,6 @@
 # API Contract
 
-The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, case notes, a basic business timeline, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
+The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, role-aware case status transitions, case notes, a basic business timeline, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -11,13 +11,14 @@ The API currently exposes health, authentication, role-aware case read endpoints
 | GET | `/api/cases/{id}` | Returns accessible case detail by id. |
 | POST | `/api/cases` | Creates a new unassigned case as Manager/Admin. |
 | PATCH | `/api/cases/{caseId}/assign` | Assigns or reassigns a case to an active Analyst as Manager/Admin. |
+| PATCH | `/api/cases/{caseId}/status` | Updates case status through the PR-09 transition matrix. |
 | GET | `/api/cases/{caseId}/notes` | Returns notes for an accessible case. |
 | POST | `/api/cases/{caseId}/notes` | Adds a plain text note to an accessible case. |
 | GET | `/api/cases/{caseId}/timeline` | Returns basic business audit timeline events for an accessible case. |
 | GET | `/api/case-types` | Returns active case type id/name pairs for dropdown lookup. |
 | GET | `/api/users/analysts` | Returns active Analysts for the assignment dropdown as Manager/Admin. |
 
-PR-08 implements Manager/Admin assignment and reassignment. Status transition, approval, dashboard endpoints, notifications, and admin configuration remain later PR scope.
+PR-09 implements status transitions with history, business audit, and RowVersion concurrency. Approval workflow, dashboard endpoints, notifications, and admin configuration remain later PR scope.
 
 ## Case List
 
@@ -112,12 +113,17 @@ Response body:
 ]
 ```
 
-Timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated`, `NoteAdded`, and `Assigned` audit events.
+Timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated`, `NoteAdded`, `Assigned`, `StatusChanged`, and `CaseReopened` audit events.
 
 Assigned events use simple descriptions such as:
 
 - `Assigned to Alex Analyst`
 - `Reassigned from Alex Analyst to Blair Analyst`
+
+Status events use simple descriptions such as:
+
+- `Status changed from Assigned to InReview`
+- `Case reopened`
 
 ## Case Create
 
@@ -171,6 +177,36 @@ Behavior:
 
 Successful assignment sets `AssignedToUserId`, updates `UpdatedAtUtc`, writes an `AssignmentHistory` row, and writes an `Assigned` business audit row. If the case was `New`, assignment changes status to `Assigned` and writes a `StatusHistory` row for `New -> Assigned`. Other statuses are not changed.
 
+## Case Status Transition
+
+`PATCH /api/cases/{caseId}/status` requires authentication.
+
+Request body:
+
+```json
+{
+  "targetStatus": "InReview",
+  "reason": "Started review after assignment.",
+  "rowVersion": "base64-row-version"
+}
+```
+
+Behavior:
+
+- Missing token: `401`
+- Analyst outside assignment scope: `403`
+- Missing case id: `404`
+- Missing target status, empty reason, missing/invalid row version, or same status: `400`
+- Stale row version: `409`
+- Disallowed business transition: `422`
+- Success: `200` with refreshed case detail and new `rowVersion`
+
+Analysts can transition only their assigned cases through allowed non-close/non-reopen workflow steps. Managers and Admins can transition any case according to the PR-09 matrix, including closing Low/Medium resolved cases and reopening closed cases.
+
+High/Critical `Resolved -> Closed` is blocked until the PR-10 approval workflow. PR-09 does not create `ApprovalRequest` rows, does not create `PendingApproval`, and does not expose approval endpoints.
+
+Successful status transitions update `Cases.Status`, write `StatusHistory`, and write a business audit event: `StatusChanged` for normal status changes or `CaseReopened` for `Closed -> Reopened`.
+
 ## Case Type Lookup
 
 `GET /api/case-types` requires authentication and returns active case types only.
@@ -208,14 +244,13 @@ No user create, edit, delete, role management, or admin user configuration endpo
 
 ## Planned Contract Areas
 
-- Status workflow
 - Manager approval decisions
 - SQL-backed dashboard metrics
 
 ## Error Handling Placeholder
 
-Case query and creation validation currently return simple `400` responses. Authorization failures use standard `401`/`403` behavior. Broader Problem Details and concurrency response documentation will be expanded when those behaviors are implemented.
+Case query and creation validation currently return simple `400` responses. Authorization failures use standard `401`/`403` behavior. Status stale-write detection returns `409`. Broader Problem Details documentation remains later scope.
 
 ## Current Boundary
 
-No generic status transition, approval, dashboard, export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented in PR-08.
+No approval, dashboard, export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented in PR-09.

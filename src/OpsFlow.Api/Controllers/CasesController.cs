@@ -12,6 +12,7 @@ public sealed class CasesController(
     ICaseQueryService caseQueryService,
     ICaseCommandService caseCommandService,
     ICaseAssignmentService caseAssignmentService,
+    ICaseStatusService caseStatusService,
     ICaseNoteService caseNoteService,
     ICaseTimelineService caseTimelineService) : ControllerBase
 {
@@ -91,6 +92,38 @@ public sealed class CasesController(
         catch (CaseAssignmentValidationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Forbid();
+        }
+    }
+
+    [HttpPatch("{caseId:guid}/status")]
+    public async Task<ActionResult<CaseDetailDto>> UpdateStatus(
+        Guid caseId,
+        [FromBody] UpdateCaseStatusRequest? request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await caseStatusService.UpdateStatusAsync(caseId, request, cancellationToken));
+        }
+        catch (CaseNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (CaseStatusValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (CaseStatusTransitionException ex)
+        {
+            return UnprocessableEntity(new { message = ex.Message });
+        }
+        catch (CaseStatusConcurrencyException ex)
+        {
+            return Conflict(new { message = ex.Message });
         }
         catch (CaseAccessDeniedException)
         {

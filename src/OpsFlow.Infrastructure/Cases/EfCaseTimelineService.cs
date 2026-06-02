@@ -35,7 +35,9 @@ public sealed class EfCaseTimelineService(
                 x.EntityId == caseId &&
                 (x.Action == AuditAction.CaseCreated ||
                     x.Action == AuditAction.NoteAdded ||
-                    x.Action == AuditAction.Assigned))
+                    x.Action == AuditAction.Assigned ||
+                    x.Action == AuditAction.StatusChanged ||
+                    x.Action == AuditAction.CaseReopened))
             .OrderBy(x => x.CreatedAtUtc)
             .ThenBy(x => x.Id)
             .Select(x => new
@@ -90,6 +92,23 @@ public sealed class EfCaseTimelineService(
             return "Note added";
         }
 
+        if (action == AuditAction.StatusChanged)
+        {
+            var statusMetadata = TryReadStatusMetadata(metadataJson);
+            if (!string.IsNullOrWhiteSpace(statusMetadata?.FromStatus) &&
+                !string.IsNullOrWhiteSpace(statusMetadata.ToStatus))
+            {
+                return $"Status changed from {statusMetadata.FromStatus} to {statusMetadata.ToStatus}";
+            }
+
+            return "Status changed";
+        }
+
+        if (action == AuditAction.CaseReopened)
+        {
+            return "Case reopened";
+        }
+
         var metadata = TryReadAssignmentMetadata(metadataJson);
         if (metadata?.ToUserId is not { } toUserId ||
             !usersById.TryGetValue(toUserId, out var toDisplayName))
@@ -123,5 +142,24 @@ public sealed class EfCaseTimelineService(
         }
     }
 
+    private static StatusMetadata? TryReadStatusMetadata(string? metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<StatusMetadata>(metadataJson, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private sealed record AssignmentMetadata(Guid? FromUserId, Guid? ToUserId, string? Reason);
+
+    private sealed record StatusMetadata(string? FromStatus, string? ToStatus, string? Reason);
 }
