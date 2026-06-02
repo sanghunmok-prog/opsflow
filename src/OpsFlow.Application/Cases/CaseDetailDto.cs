@@ -1,3 +1,5 @@
+using OpsFlow.Application.Approvals;
+
 namespace OpsFlow.Application.Cases;
 
 public sealed record CaseDetailDto(
@@ -13,5 +15,7 @@ public sealed record CaseDetailDto(
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc,
     DateTime DueAtUtc,
+    DateTime? ClosedAtUtc,
     bool IsOverdue,
-    string RowVersion);
+    string RowVersion,
+    ApprovalSummaryDto? ApprovalSummary = null);

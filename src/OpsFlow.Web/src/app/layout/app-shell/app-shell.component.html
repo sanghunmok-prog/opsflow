@@ -5,6 +5,9 @@
     <nav class="nav" aria-label="Primary navigation">
       <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
       <a routerLink="/cases" routerLinkActive="active">{{ caseNavLabel() }}</a>
+      @if (canManageApprovals()) {
+        <a routerLink="/approvals" routerLinkActive="active">Approvals</a>
+      }
     </nav>
 
     @if (currentUser(); as user) {

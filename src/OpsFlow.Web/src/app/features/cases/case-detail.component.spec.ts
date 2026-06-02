@@ -215,6 +215,66 @@ describe('CaseDetailComponent', () => {
 
     expect(component.statusSaveError()).toBe('This case was updated by another user. Please refresh.');
   });
+
+  it('shows closure request panel for assigned Analyst on resolved High case', async () => {
+    auth.roles = ['Analyst'];
+    api.caseOverride = { status: 'Resolved', priority: 'High' };
+    fixture = TestBed.createComponent(CaseDetailComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).toContain('Closure Approval');
+    expect(compiled.textContent).toContain('Request Closure Approval');
+  });
+
+  it('hides closure request panel for resolved Low case', async () => {
+    auth.roles = ['Analyst'];
+    api.caseOverride = { status: 'Resolved', priority: 'Low' };
+    fixture = TestBed.createComponent(CaseDetailComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).not.toContain('Request Closure Approval');
+  });
+
+  it('does not submit empty closure request reason', async () => {
+    auth.roles = ['Analyst'];
+    api.caseOverride = { status: 'Resolved', priority: 'High' };
+    fixture = TestBed.createComponent(CaseDetailComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.closureRequestForm.setValue({ requestReason: '   ' });
+    component.submitClosureRequest();
+
+    expect(component.closureValidationMessage()).toContain('required');
+    expect(api.closureRequests).toEqual([]);
+  });
+
+  it('submits closure request with trimmed reason and rowVersion', async () => {
+    auth.roles = ['Analyst'];
+    api.caseOverride = { status: 'Resolved', priority: 'High' };
+    fixture = TestBed.createComponent(CaseDetailComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.closureRequestForm.setValue({ requestReason: '  Work is complete.  ' });
+    component.submitClosureRequest();
+
+    expect(api.closureRequests).toEqual([
+      {
+        caseId: 'case-1',
+        requestReason: 'Work is complete.',
+        rowVersion: 'AAAA',
+      },
+    ]);
+  });
 });
 
 class FakeAuthService {
@@ -233,6 +293,10 @@ class FakeAuthService {
   hasAnyRole(roles: string[]): boolean {
     return roles.some((role) => this.roles.includes(role));
   }
+
+  hasRole(role: string): boolean {
+    return this.roles.includes(role);
+  }
 }
 
 class FakeCaseApiService {
@@ -242,6 +306,7 @@ class FakeCaseApiService {
   timelineCalls = 0;
   addedNotes: string[] = [];
   statusError: HttpErrorResponse | null = null;
+  caseOverride: Partial<{ status: string; priority: string }> = {};
   assignedCases: Array<{
     caseId: string;
     assignedToUserId: string;
@@ -254,6 +319,11 @@ class FakeCaseApiService {
     reason: string;
     rowVersion: string;
   }> = [];
+  closureRequests: Array<{
+    caseId: string;
+    requestReason: string;
+    rowVersion: string;
+  }> = [];
 
   getCase(id: string) {
     this.detailCalls += 1;
@@ -263,8 +333,8 @@ class FakeCaseApiService {
       title: 'Vendor exception',
       description: 'Synthetic internal case',
       caseType: { id: 'case-type-1', name: 'Vendor Approval Issue' },
-      priority: 'High',
-      status: 'Assigned',
+      priority: this.caseOverride.priority ?? 'High',
+      status: this.caseOverride.status ?? 'Assigned',
       assignedTo: { id: 'user-1', displayName: 'Demo Analyst' },
       createdBy: { id: 'manager-1', displayName: 'Demo Manager' },
       createdAtUtc: '2026-06-01T00:00:00Z',
@@ -324,6 +394,23 @@ class FakeCaseApiService {
       dueAtUtc: '2026-06-02T00:00:00Z',
       isOverdue: false,
       rowVersion: 'AAAC',
+    });
+  }
+
+  requestClosure(caseId: string, request: { requestReason: string; rowVersion: string }) {
+    this.closureRequests.push({ caseId, ...request });
+    return of({
+      id: 'approval-1',
+      caseId,
+      caseNumber: 'OPF-2026-0001',
+      caseTitle: 'Vendor exception',
+      priority: 'High',
+      caseStatus: 'PendingApproval',
+      approvalStatus: 'Pending',
+      requestReason: request.requestReason,
+      requestedBy: { id: 'user-1', displayName: 'Demo Analyst' },
+      requestedAtUtc: '2026-06-01T04:00:00Z',
+      rowVersion: 'AAAD',
     });
   }
 

@@ -1,6 +1,6 @@
 # API Contract
 
-The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, role-aware case status transitions, case notes, a basic business timeline, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
+The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, role-aware case status transitions, High/Critical closure approvals, case notes, a basic business timeline, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -12,13 +12,17 @@ The API currently exposes health, authentication, role-aware case read endpoints
 | POST | `/api/cases` | Creates a new unassigned case as Manager/Admin. |
 | PATCH | `/api/cases/{caseId}/assign` | Assigns or reassigns a case to an active Analyst as Manager/Admin. |
 | PATCH | `/api/cases/{caseId}/status` | Updates case status through the PR-09 transition matrix. |
+| POST | `/api/cases/{caseId}/closure-request` | Requests Manager/Admin closure approval for a Resolved High/Critical case. |
+| GET | `/api/approvals/pending` | Returns the Manager/Admin pending approval queue. |
+| POST | `/api/approvals/{approvalId}/approve` | Approves a pending closure request and closes the case. |
+| POST | `/api/approvals/{approvalId}/reject` | Rejects a pending closure request and returns the case to InReview. |
 | GET | `/api/cases/{caseId}/notes` | Returns notes for an accessible case. |
 | POST | `/api/cases/{caseId}/notes` | Adds a plain text note to an accessible case. |
 | GET | `/api/cases/{caseId}/timeline` | Returns basic business audit timeline events for an accessible case. |
 | GET | `/api/case-types` | Returns active case type id/name pairs for dropdown lookup. |
 | GET | `/api/users/analysts` | Returns active Analysts for the assignment dropdown as Manager/Admin. |
 
-PR-09 implements status transitions with history, business audit, and RowVersion concurrency. Approval workflow, dashboard endpoints, notifications, and admin configuration remain later PR scope.
+PR-09 implements status transitions with history, business audit, and RowVersion concurrency. PR-10 implements High/Critical closure approvals. Dashboard endpoints, notifications, and admin configuration remain later PR scope.
 
 ## Case List
 
@@ -113,7 +117,7 @@ Response body:
 ]
 ```
 
-Timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated`, `NoteAdded`, `Assigned`, `StatusChanged`, and `CaseReopened` audit events.
+Timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated`, `NoteAdded`, `Assigned`, `StatusChanged`, `ClosureRequested`, `ApprovalApproved`, `ApprovalRejected`, and `CaseReopened` audit events.
 
 Assigned events use simple descriptions such as:
 
@@ -124,6 +128,12 @@ Status events use simple descriptions such as:
 
 - `Status changed from Assigned to InReview`
 - `Case reopened`
+
+Approval events use simple descriptions such as:
+
+- `Closure approval requested`
+- `Closure approved`
+- `Closure rejected`
 
 ## Case Create
 
@@ -203,9 +213,88 @@ Behavior:
 
 Analysts can transition only their assigned cases through allowed non-close/non-reopen workflow steps. Managers and Admins can transition any case according to the PR-09 matrix, including closing Low/Medium resolved cases and reopening closed cases.
 
-High/Critical `Resolved -> Closed` is blocked until the PR-10 approval workflow. PR-09 does not create `ApprovalRequest` rows, does not create `PendingApproval`, and does not expose approval endpoints.
+High/Critical `Resolved -> Closed` is blocked in the status endpoint and must go through the PR-10 approval workflow.
 
 Successful status transitions update `Cases.Status`, write `StatusHistory`, and write a business audit event: `StatusChanged` for normal status changes or `CaseReopened` for `Closed -> Reopened`.
+
+`PATCH /api/cases/{caseId}/status` still cannot transition directly into `PendingApproval`. High/Critical `Resolved -> Closed` must use the approval workflow. Low/Medium resolved cases can close through this status endpoint.
+
+## Closure Request
+
+`POST /api/cases/{caseId}/closure-request` requires authentication and enforces object-level access.
+
+Request body:
+
+```json
+{
+  "requestReason": "Work is complete and ready for manager closure review.",
+  "rowVersion": "base64-case-row-version"
+}
+```
+
+Behavior:
+
+- Missing token: `401`
+- Assigned Analyst for their own Resolved High/Critical case: `200`
+- Analyst outside assignment scope: `403`
+- Manager/Admin for any Resolved High/Critical case: `200`
+- Missing case id: `404`
+- Empty reason, invalid row version, Low/Medium case, or non-Resolved case: `400`
+- Stale row version or duplicate pending approval: `409`
+
+Successful requests set the case status to `PendingApproval`, create a pending `ApprovalRequest`, write `StatusHistory` for `Resolved -> PendingApproval`, and write a `ClosureRequested` business audit event.
+
+## Pending Approvals
+
+`GET /api/approvals/pending?page=1&pageSize=20` requires the Manager or Admin role.
+
+Behavior:
+
+- Missing token: `401`
+- Analyst token: `403`
+- Manager/Admin token: `200`
+- Invalid page/pageSize: `400`
+
+The response is `PagedResult<ApprovalQueueItemDto>` and includes pending approval id, case link data, priority, case status, request reason, requester, assignee, due date, query-time overdue flag, and latest case row version.
+
+## Approval Decisions
+
+`POST /api/approvals/{approvalId}/approve` requires the Manager or Admin role.
+
+Request body:
+
+```json
+{
+  "decisionReason": "Approved for closure.",
+  "rowVersion": "optional-base64-case-row-version"
+}
+```
+
+`decisionReason` is optional for approval. If `rowVersion` is supplied, stale values return `409`.
+
+Successful approval marks the `ApprovalRequest` as `Approved`, sets reviewer and decision timestamp, changes the case to `Closed`, sets `ClosedAtUtc`, writes `StatusHistory` for `PendingApproval -> Closed`, and writes an `ApprovalApproved` business audit event.
+
+`POST /api/approvals/{approvalId}/reject` requires the Manager or Admin role.
+
+Request body:
+
+```json
+{
+  "decisionReason": "More review is required before closure.",
+  "rowVersion": "optional-base64-case-row-version"
+}
+```
+
+`decisionReason` is required for rejection. Successful rejection marks the `ApprovalRequest` as `Rejected`, sets reviewer and decision timestamp, changes the case to `InReview`, leaves `ClosedAtUtc` unset, writes `StatusHistory` for `PendingApproval -> InReview`, and writes an `ApprovalRejected` business audit event.
+
+Decision behavior:
+
+- Missing token: `401`
+- Analyst token: `403`
+- Missing approval id: `404`
+- Missing reject reason or invalid supplied row version: `400`
+- Already decided approval, stale supplied row version, or related case not pending approval: `409`
+- Success: `200` with latest case row version
 
 ## Case Type Lookup
 
@@ -244,13 +333,12 @@ No user create, edit, delete, role management, or admin user configuration endpo
 
 ## Planned Contract Areas
 
-- Manager approval decisions
 - SQL-backed dashboard metrics
 
 ## Error Handling Placeholder
 
-Case query and creation validation currently return simple `400` responses. Authorization failures use standard `401`/`403` behavior. Status stale-write detection returns `409`. Broader Problem Details documentation remains later scope.
+Case query and creation validation currently return simple `400` responses. Authorization failures use standard `401`/`403` behavior. Status and approval stale-write detection return `409`. Broader Problem Details documentation remains later scope.
 
 ## Current Boundary
 
-No approval, dashboard, export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented in PR-09.
+No dashboard, export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented in PR-10.

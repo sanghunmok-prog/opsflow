@@ -104,6 +104,7 @@ public sealed class EfCaseCommandService(
                 x.CreatedAtUtc,
                 x.UpdatedAtUtc,
                 x.DueAtUtc,
+                x.ClosedAtUtc,
                 x.Status != CaseStatus.Closed && createdAtUtc > x.DueAtUtc,
                 Convert.ToBase64String(x.RowVersion)))
             .SingleAsync(cancellationToken);

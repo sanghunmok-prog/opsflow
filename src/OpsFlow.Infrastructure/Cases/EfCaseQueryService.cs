@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using OpsFlow.Application.Approvals;
 using OpsFlow.Application.Auth;
 using OpsFlow.Application.Cases;
 using OpsFlow.Application.Common;
@@ -121,8 +122,27 @@ public sealed class EfCaseQueryService(
                 x.CreatedAtUtc,
                 x.UpdatedAtUtc,
                 x.DueAtUtc,
+                x.ClosedAtUtc,
                 IsOverdue = x.Status != CaseStatus.Closed && nowUtc > x.DueAtUtc,
-                x.RowVersion
+                x.RowVersion,
+                ApprovalSummary = x.ApprovalRequests
+                    .OrderByDescending(approval => approval.RequestedAtUtc)
+                    .Select(approval => new ApprovalSummaryDto(
+                        approval.Id,
+                        approval.Status.ToString(),
+                        approval.RequestReason,
+                        new CaseUserSummaryDto(
+                            approval.RequestedByUser.Id,
+                            approval.RequestedByUser.DisplayName),
+                        approval.RequestedAtUtc,
+                        approval.DecisionReason,
+                        approval.ReviewedByUser == null
+                            ? null
+                            : new CaseUserSummaryDto(
+                                approval.ReviewedByUser.Id,
+                                approval.ReviewedByUser.DisplayName),
+                        approval.DecisionAtUtc))
+                    .FirstOrDefault()
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -150,8 +170,10 @@ public sealed class EfCaseQueryService(
             opsCase.CreatedAtUtc,
             opsCase.UpdatedAtUtc,
             opsCase.DueAtUtc,
+            opsCase.ClosedAtUtc,
             opsCase.IsOverdue,
-            Convert.ToBase64String(opsCase.RowVersion));
+            Convert.ToBase64String(opsCase.RowVersion),
+            opsCase.ApprovalSummary);
     }
 
     private IQueryable<OpsCase> ApplyAccessScope(IQueryable<OpsCase> cases, Guid? requestedAssignedToUserId)

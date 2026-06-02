@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using OpsFlow.Application.Approvals;
 using OpsFlow.Application.Auth;
 using OpsFlow.Application.Cases;
 
@@ -14,7 +15,8 @@ public sealed class CasesController(
     ICaseAssignmentService caseAssignmentService,
     ICaseStatusService caseStatusService,
     ICaseNoteService caseNoteService,
-    ICaseTimelineService caseTimelineService) : ControllerBase
+    ICaseTimelineService caseTimelineService,
+    IApprovalService approvalService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PagedResult<CaseListItemDto>>> GetCases(
@@ -122,6 +124,38 @@ public sealed class CasesController(
             return UnprocessableEntity(new { message = ex.Message });
         }
         catch (CaseStatusConcurrencyException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Forbid();
+        }
+    }
+
+    [HttpPost("{caseId:guid}/closure-request")]
+    public async Task<ActionResult<ApprovalRequestDto>> RequestClosure(
+        Guid caseId,
+        [FromBody] RequestClosureRequest? request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await approvalService.RequestClosureAsync(caseId, request, cancellationToken));
+        }
+        catch (CaseNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ApprovalValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (ApprovalConcurrencyException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+        catch (ApprovalStateConflictException ex)
         {
             return Conflict(new { message = ex.Message });
         }
