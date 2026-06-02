@@ -31,6 +31,9 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICaseQueryService, EfCaseQueryService>();
 builder.Services.AddScoped<ICaseCommandService, EfCaseCommandService>();
+builder.Services.AddScoped<ICaseAccessService, EfCaseAccessService>();
+builder.Services.AddScoped<ICaseNoteService, EfCaseNoteService>();
+builder.Services.AddScoped<ICaseTimelineService, EfCaseTimelineService>();
 builder.Services.AddScoped<ISlaService, SlaService>();
 builder.Services.AddControllers();
 builder.Services

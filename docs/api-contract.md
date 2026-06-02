@@ -1,6 +1,6 @@
 # API Contract
 
-The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, and an authenticated case type lookup for the Angular create form.
+The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, case notes, a basic business timeline, and an authenticated case type lookup for the Angular create form.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -10,9 +10,12 @@ The API currently exposes health, authentication, role-aware case read endpoints
 | GET | `/api/cases` | Returns a paginated, filtered, sorted, role-aware case queue. |
 | GET | `/api/cases/{id}` | Returns accessible case detail by id. |
 | POST | `/api/cases` | Creates a new unassigned case as Manager/Admin. |
+| GET | `/api/cases/{caseId}/notes` | Returns notes for an accessible case. |
+| POST | `/api/cases/{caseId}/notes` | Adds a plain text note to an accessible case. |
+| GET | `/api/cases/{caseId}/timeline` | Returns basic business audit timeline events for an accessible case. |
 | GET | `/api/case-types` | Returns active case type id/name pairs for dropdown lookup. |
 
-PR-06 implements the Angular case queue screen and simple Manager/Admin create form. Notes, assignment, status transition, approval, audit timeline endpoints, dashboard endpoints, case detail UI, and admin configuration remain later PR scope.
+PR-07 implements the Angular case detail screen, notes, and basic audit timeline. Assignment, status transition, approval, dashboard endpoints, and admin configuration remain later PR scope.
 
 ## Case List
 
@@ -45,6 +48,69 @@ List items include query-time `isOverdue`, calculated as `Status != Closed && no
 - Accessible case: `200`
 
 Detail responses include case metadata, case type summary, assigned user summary, created-by user summary, timestamps, due date, query-time `isOverdue`, and base64 row version.
+
+## Case Notes
+
+`GET /api/cases/{caseId}/notes` and `POST /api/cases/{caseId}/notes` require authentication and enforce the same object-level access rules as case detail.
+
+- Missing token: `401`
+- Missing case id: `404`
+- Existing case outside Analyst assignment scope: `403`
+- Accessible case: `200` for reads, `201` for successful note creation
+
+GET response body:
+
+```json
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "body": "Reviewed the case and confirmed next action.",
+    "createdBy": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "displayName": "Alex Analyst"
+    },
+    "createdAtUtc": "2026-05-22T14:30:00Z"
+  }
+]
+```
+
+POST request body:
+
+```json
+{
+  "body": "Reviewed the case and confirmed next action."
+}
+```
+
+Note bodies are trimmed, required, plain text, and limited to 2000 characters. Empty or whitespace-only bodies return `400`. Successful creation writes both a `CaseNote` row and a `NoteAdded` business audit row.
+
+## Case Timeline
+
+`GET /api/cases/{caseId}/timeline` requires authentication and enforces the same object-level access rules as case detail.
+
+- Missing token: `401`
+- Missing case id: `404`
+- Existing case outside Analyst assignment scope: `403`
+- Accessible case: `200`
+
+Response body:
+
+```json
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "action": "CaseCreated",
+    "actor": {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "displayName": "Morgan Manager"
+    },
+    "createdAtUtc": "2026-05-22T14:00:00Z",
+    "description": "Case created"
+  }
+]
+```
+
+PR-07 timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated` and `NoteAdded` audit events only.
 
 ## Case Create
 
@@ -91,10 +157,9 @@ No case type mutation endpoints are exposed.
 
 ## Planned Contract Areas
 
-- Notes and status workflow
 - Manager reassignment
+- Status workflow
 - Manager approval decisions
-- Audit timeline
 - SQL-backed dashboard metrics
 
 ## Error Handling Placeholder
@@ -103,4 +168,4 @@ Case query and creation validation currently return simple `400` responses. Auth
 
 ## Current Boundary
 
-No notes, assignment mutation, status transition, approval, dashboard, export, notification, case detail UI, or case type administration endpoints are implemented in PR-06.
+No assignment mutation, status transition, approval, dashboard, export, notification, note edit/delete, attachments, rich text, or case type administration endpoints are implemented in PR-07.

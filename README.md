@@ -6,7 +6,7 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. PR-05 adds the Angular authentication shell, demo login flow, protected routes, and role-aware navigation. Assignment, status, notes, approval, dashboard metrics, and Angular business workflow screens are intentionally deferred to later PRs.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. PR-05 adds the Angular authentication shell, demo login flow, protected routes, and role-aware navigation. PR-07 adds case detail UI, plain text notes, and a basic business audit timeline. Assignment, status, approval, and dashboard metrics are intentionally deferred to later PRs.
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, basic Manager/Admin case creation with SLA due dates, and an Angular authentication shell. It does not implement assignment workflow, status workflow, notes APIs, approval workflow behavior, dashboard metrics endpoints, or Angular case workflow UI.
+These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, basic Manager/Admin case creation with SLA due dates, an Angular authentication shell, case detail UI, notes, and a basic audit timeline. It does not implement assignment workflow, status workflow, approval workflow behavior, or dashboard metrics endpoints.
 
 ## Local Setup
 
@@ -126,6 +126,12 @@ Authenticated users can read cases through:
 
 - `GET /api/cases`
 - `GET /api/cases/{id}`
+- `GET /api/cases/{caseId}/notes`
+- `GET /api/cases/{caseId}/timeline`
+
+Authenticated users can add plain text notes to accessible cases through:
+
+- `POST /api/cases/{caseId}/notes`
 
 Managers and Admins can create unassigned cases through:
 
@@ -139,7 +145,7 @@ Authenticated users can load active case type dropdown options through:
 
 `GET /api/cases` supports `page`, `pageSize`, `search`, `status`, `priority`, `caseTypeId`, `assignedToUserId`, `overdue`, `sortBy`, and `sortDirection`. Analysts are constrained server-side to their own assigned cases. Managers and Admins can read all cases and filter by assignee.
 
-These endpoints return DTOs only. They include query-time `isOverdue` and do not expose notes, assignment history, status history, approval actions, dashboard metrics, Identity internals, case type mutation, or workflow mutation behavior.
+These endpoints return DTOs only. They include query-time `isOverdue`, plain text notes, and `CaseCreated` / `NoteAdded` business timeline events. They do not expose note edit/delete, attachments, assignment history, status history, approval actions, dashboard metrics, Identity internals, case type mutation, or workflow mutation behavior.
 
 ## Screenshots
 
@@ -153,4 +159,4 @@ Screenshots will be added as the Angular workflow screens are implemented.
 - Demo script: [docs/demo-script.md](docs/demo-script.md)
 - Data model: [docs/data-model.md](docs/data-model.md)
 
-The database schema was introduced in PR-01 and corrected in PR-01A. Case read API contracts are available now; mutation workflows and UI screens will be implemented in later PRs.
+The database schema was introduced in PR-01 and corrected in PR-01A. Case read, notes, and basic timeline API contracts are available now; assignment, status, approval, and dashboard workflows will be implemented in later PRs.

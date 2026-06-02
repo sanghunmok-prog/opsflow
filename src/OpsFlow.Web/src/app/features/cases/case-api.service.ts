@@ -5,10 +5,14 @@ import { Observable } from 'rxjs';
 import {
   CaseListItem,
   CaseListQuery,
+  CaseDetail,
+  CaseNote,
   CaseTypeSummary,
+  CreateCaseNoteRequest,
   CreateCaseRequest,
   CreateCaseResponse,
   PagedResult,
+  TimelineItem,
 } from './case.models';
 
 @Injectable({ providedIn: 'root' })
@@ -23,6 +27,23 @@ export class CaseApiService {
 
   createCase(request: CreateCaseRequest): Observable<CreateCaseResponse> {
     return this.http.post<CreateCaseResponse>('/api/cases', request);
+  }
+
+  getCase(id: string): Observable<CaseDetail> {
+    return this.http.get<CaseDetail>(`/api/cases/${id}`);
+  }
+
+  getNotes(caseId: string): Observable<CaseNote[]> {
+    return this.http.get<CaseNote[]>(`/api/cases/${caseId}/notes`);
+  }
+
+  addNote(caseId: string, body: string): Observable<CaseNote> {
+    const request: CreateCaseNoteRequest = { body };
+    return this.http.post<CaseNote>(`/api/cases/${caseId}/notes`, request);
+  }
+
+  getTimeline(caseId: string): Observable<TimelineItem[]> {
+    return this.http.get<TimelineItem[]>(`/api/cases/${caseId}/timeline`);
   }
 
   getCaseTypes(): Observable<CaseTypeSummary[]> {

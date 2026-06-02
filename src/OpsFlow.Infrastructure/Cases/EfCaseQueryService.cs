@@ -12,7 +12,8 @@ namespace OpsFlow.Infrastructure.Cases;
 public sealed class EfCaseQueryService(
     OpsFlowDbContext dbContext,
     ICurrentUserService currentUser,
-    IClock clock) : ICaseQueryService
+    IClock clock,
+    ICaseAccessService caseAccessService) : ICaseQueryService
 {
     private const int MaxPageSize = 100;
 
@@ -130,7 +131,8 @@ public sealed class EfCaseQueryService(
             return null;
         }
 
-        if (!CanAccessCase(opsCase.AssignedToUserId))
+        var access = await caseAccessService.GetAccessStatusAsync(id, cancellationToken);
+        if (access == CaseAccessStatus.Forbidden)
         {
             throw new CaseAccessDeniedException("The current user cannot access this case.");
         }
@@ -173,17 +175,6 @@ public sealed class EfCaseQueryService(
         }
 
         throw new CaseAccessDeniedException("The current user cannot access cases.");
-    }
-
-    private bool CanAccessCase(Guid? assignedToUserId)
-    {
-        if (currentUser.UserId is not { } userId)
-        {
-            return false;
-        }
-
-        return currentUser.IsManagerOrAdmin ||
-            (currentUser.IsAnalyst && assignedToUserId == userId);
     }
 
     private static void ValidatePaging(int page, int pageSize)
