@@ -43,6 +43,36 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Get_case_notes_without_token_returns_unauthorized()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+
+        var response = await factory.CreateClient().GetAsync($"/api/cases/{caseId}/notes");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Post_case_note_without_token_returns_unauthorized()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+
+        var response = await factory.CreateClient().PostAsJsonAsync($"/api/cases/{caseId}/notes", NoteBody());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_case_timeline_without_token_returns_unauthorized()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+
+        var response = await factory.CreateClient().GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Get_case_types_without_token_returns_unauthorized()
     {
         var response = await factory.CreateClient().GetAsync("/api/case-types");
@@ -223,6 +253,206 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         var response = await client.GetAsync($"/api/cases/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Assigned_analyst_can_get_case_notes()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseId = await GetCaseAssignedToAsync(analystId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/notes");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(await response.Content.ReadFromJsonAsync<IReadOnlyList<CaseNoteBody>>());
+    }
+
+    [Fact]
+    public async Task Unassigned_analyst_cannot_get_case_notes()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseId = await GetCaseNotAssignedToAsync(analystId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/notes");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("manager@opsflow.local")]
+    [InlineData("admin@opsflow.local")]
+    public async Task Manager_and_admin_can_get_case_notes(string email)
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync(email);
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/notes");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Missing_case_notes_return_not_found()
+    {
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.GetAsync($"/api/cases/{Guid.NewGuid()}/notes");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Assigned_analyst_can_add_case_note()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseId = await GetCaseAssignedToAsync(analystId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.PostAsJsonAsync($"/api/cases/{caseId}/notes", NoteBody("  Analyst reviewed next step.  "));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var note = await response.Content.ReadFromJsonAsync<CaseNoteBody>();
+        Assert.NotNull(note);
+        Assert.Equal("Analyst reviewed next step.", note.Body);
+        Assert.Equal(analystId, note.CreatedBy.Id);
+    }
+
+    [Fact]
+    public async Task Unassigned_analyst_cannot_add_case_note()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseId = await GetCaseNotAssignedToAsync(analystId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.PostAsJsonAsync($"/api/cases/{caseId}/notes", NoteBody());
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("manager@opsflow.local")]
+    [InlineData("admin@opsflow.local")]
+    public async Task Manager_and_admin_can_add_case_note(string email)
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync(email);
+
+        var response = await client.PostAsJsonAsync($"/api/cases/{caseId}/notes", NoteBody());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Empty_case_note_returns_bad_request(string body)
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PostAsJsonAsync($"/api/cases/{caseId}/notes", NoteBody(body));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Valid_case_note_creates_note_and_note_added_audit()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var actorId = await GetUserIdAsync("manager@opsflow.local");
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PostAsJsonAsync($"/api/cases/{caseId}/notes", NoteBody("Reviewed the case."));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var note = await response.Content.ReadFromJsonAsync<CaseNoteBody>();
+        Assert.NotNull(note);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var caseNote = await dbContext.CaseNotes.SingleAsync(x => x.Id == note.Id);
+        Assert.Equal(caseId, caseNote.CaseId);
+        Assert.Equal(actorId, caseNote.AuthorUserId);
+        Assert.Equal("Reviewed the case.", caseNote.Body);
+
+        var auditLog = await dbContext.AuditLogs.SingleAsync(x =>
+            x.EntityType == "Case" &&
+            x.EntityId == caseId &&
+            x.Action == AuditAction.NoteAdded &&
+            x.MetadataJson != null &&
+            x.MetadataJson.Contains(note.Id.ToString()));
+        Assert.Equal(actorId, auditLog.ActorUserId);
+        Assert.Equal(OpsFlowApiFactory.FixedNowUtc, auditLog.CreatedAtUtc);
+    }
+
+    [Fact]
+    public async Task Assigned_analyst_can_get_case_timeline()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseId = await GetCaseAssignedToAsync(analystId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unassigned_analyst_cannot_get_case_timeline()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseId = await GetCaseNotAssignedToAsync(analystId);
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("manager@opsflow.local")]
+    [InlineData("admin@opsflow.local")]
+    public async Task Manager_and_admin_can_get_case_timeline(string email)
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync(email);
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Missing_case_timeline_returns_not_found()
+    {
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.GetAsync($"/api/cases/{Guid.NewGuid()}/timeline");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Timeline_includes_case_created_and_note_added_in_chronological_order()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var addNoteResponse = await client.PostAsJsonAsync($"/api/cases/{caseId}/notes", NoteBody("Timeline note."));
+        Assert.Equal(HttpStatusCode.Created, addNoteResponse.StatusCode);
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var timeline = await response.Content.ReadFromJsonAsync<IReadOnlyList<CaseTimelineItemBody>>();
+        Assert.NotNull(timeline);
+        Assert.Contains(timeline, x => x.Action == nameof(AuditAction.CaseCreated));
+        Assert.Contains(timeline, x => x.Action == nameof(AuditAction.NoteAdded));
+        Assert.Equal(
+            timeline.Select(x => x.CreatedAtUtc).OrderBy(x => x).ToArray(),
+            timeline.Select(x => x.CreatedAtUtc).ToArray());
     }
 
     [Fact]
@@ -630,6 +860,11 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         priority
     };
 
+    private static object NoteBody(string body = "Reviewed the case and confirmed next action.") => new
+    {
+        body
+    };
+
     private sealed record LoginResponseBody(
         [property: JsonPropertyName("accessToken")] string AccessToken);
 
@@ -662,6 +897,19 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         [property: JsonPropertyName("updatedAtUtc")] DateTime UpdatedAtUtc,
         [property: JsonPropertyName("dueAtUtc")] DateTime DueAtUtc,
         [property: JsonPropertyName("isOverdue")] bool IsOverdue);
+
+    private sealed record CaseNoteBody(
+        [property: JsonPropertyName("id")] Guid Id,
+        [property: JsonPropertyName("body")] string Body,
+        [property: JsonPropertyName("createdBy")] SummaryBody CreatedBy,
+        [property: JsonPropertyName("createdAtUtc")] DateTime CreatedAtUtc);
+
+    private sealed record CaseTimelineItemBody(
+        [property: JsonPropertyName("id")] Guid Id,
+        [property: JsonPropertyName("action")] string Action,
+        [property: JsonPropertyName("actor")] SummaryBody? Actor,
+        [property: JsonPropertyName("createdAtUtc")] DateTime CreatedAtUtc,
+        [property: JsonPropertyName("description")] string Description);
 
     private sealed record CaseTypeSummaryBody(
         [property: JsonPropertyName("id")] Guid Id,

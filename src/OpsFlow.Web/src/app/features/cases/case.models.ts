@@ -64,6 +64,42 @@ export interface CreateCaseResponse {
   rowVersion: string;
 }
 
+export interface CaseDetail {
+  id: string;
+  caseNumber: string;
+  title: string;
+  description: string;
+  caseType: CaseTypeSummary;
+  priority: CasePriority;
+  status: CaseStatus;
+  assignedTo: UserSummary | null;
+  createdBy: UserSummary;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  dueAtUtc: string;
+  isOverdue: boolean;
+  rowVersion: string;
+}
+
+export interface CaseNote {
+  id: string;
+  body: string;
+  createdBy: UserSummary;
+  createdAtUtc: string;
+}
+
+export interface CreateCaseNoteRequest {
+  body: string;
+}
+
+export interface TimelineItem {
+  id: string;
+  action: 'CaseCreated' | 'NoteAdded';
+  actor: UserSummary | null;
+  createdAtUtc: string;
+  description: string;
+}
+
 export type CasePriority = 'Low' | 'Medium' | 'High' | 'Critical';
 export type CaseStatus =
   | 'New'

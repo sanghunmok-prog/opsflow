@@ -216,6 +216,7 @@ const SORT_OPTIONS: CaseSortBy[] = ['caseNumber', 'createdAtUtc', 'dueAtUtc', 'p
                     SLA Due {{ sortIndicator('dueAtUtc') }}
                   </button>
                 </th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -242,6 +243,9 @@ const SORT_OPTIONS: CaseSortBy[] = ['caseNumber', 'createdAtUtc', 'dueAtUtc', 'p
                     @if (caseItem.isOverdue) {
                       <span class="badge overdue">Overdue</span>
                     }
+                  </td>
+                  <td>
+                    <button type="button" class="secondary" (click)="viewCase(caseItem.id)">View</button>
                   </td>
                 </tr>
               }
@@ -676,6 +680,10 @@ export class CasesComponent {
   goToPage(page: number): void {
     const boundedPage = Math.min(Math.max(page, 1), this.totalPages());
     this.navigateWithQuery({ ...this.query(), page: boundedPage });
+  }
+
+  viewCase(id: string): void {
+    this.router.navigate(['/cases', id]);
   }
 
   toggleCreateForm(): void {

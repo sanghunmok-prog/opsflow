@@ -10,7 +10,9 @@ namespace OpsFlow.Api.Controllers;
 [Route("api/cases")]
 public sealed class CasesController(
     ICaseQueryService caseQueryService,
-    ICaseCommandService caseCommandService) : ControllerBase
+    ICaseCommandService caseCommandService,
+    ICaseNoteService caseNoteService,
+    ICaseTimelineService caseTimelineService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PagedResult<CaseListItemDto>>> GetCases(
@@ -67,6 +69,69 @@ public sealed class CasesController(
         catch (SlaRuleNotFoundException ex)
         {
             return UnprocessableEntity(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("{caseId:guid}/notes")]
+    public async Task<ActionResult<IReadOnlyList<CaseNoteDto>>> GetNotes(
+        Guid caseId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var notes = await caseNoteService.GetNotesAsync(caseId, cancellationToken);
+            return notes is null ? NotFound() : Ok(notes);
+        }
+        catch (CaseNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Forbid();
+        }
+    }
+
+    [HttpPost("{caseId:guid}/notes")]
+    public async Task<ActionResult<CaseNoteDto>> AddNote(
+        Guid caseId,
+        [FromBody] CreateCaseNoteRequest? request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var note = await caseNoteService.AddNoteAsync(caseId, request, cancellationToken);
+            return note is null
+                ? NotFound()
+                : Created($"/api/cases/{caseId}/notes/{note.Id}", note);
+        }
+        catch (CaseNoteValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (CaseNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Forbid();
+        }
+    }
+
+    [HttpGet("{caseId:guid}/timeline")]
+    public async Task<ActionResult<IReadOnlyList<CaseTimelineItemDto>>> GetTimeline(
+        Guid caseId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var timeline = await caseTimelineService.GetTimelineAsync(caseId, cancellationToken);
+            return timeline is null ? NotFound() : Ok(timeline);
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Forbid();
         }
     }
 }
