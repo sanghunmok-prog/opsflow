@@ -131,11 +131,15 @@ Managers and Admins can create unassigned cases through:
 
 - `POST /api/cases`
 
+Authenticated users can load active case type dropdown options through:
+
+- `GET /api/case-types`
+
 `POST /api/cases` accepts title, description, case type id, and priority only. The API sets `Status = New`, leaves `AssignedTo = null`, records the current user as creator, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
 
 `GET /api/cases` supports `page`, `pageSize`, `search`, `status`, `priority`, `caseTypeId`, `assignedToUserId`, `overdue`, `sortBy`, and `sortDirection`. Analysts are constrained server-side to their own assigned cases. Managers and Admins can read all cases and filter by assignee.
 
-These endpoints return DTOs only. They include query-time `isOverdue` and do not expose notes, assignment history, status history, approval actions, dashboard metrics, Identity internals, or workflow mutation behavior.
+These endpoints return DTOs only. They include query-time `isOverdue` and do not expose notes, assignment history, status history, approval actions, dashboard metrics, Identity internals, case type mutation, or workflow mutation behavior.
 
 ## Screenshots
 
