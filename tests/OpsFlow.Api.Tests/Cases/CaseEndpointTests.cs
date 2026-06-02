@@ -2,10 +2,12 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpsFlow.Api.Tests.Auth;
 using OpsFlow.Application.Auth;
+using OpsFlow.Domain.Constants;
 using OpsFlow.Domain.Entities;
 using OpsFlow.Domain.Enums;
 using OpsFlow.Infrastructure.Data;
@@ -73,6 +75,26 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Assign_case_without_token_returns_unauthorized()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+
+        var response = await factory.CreateClient()
+            .PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(analystId));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_analysts_without_token_returns_unauthorized()
+    {
+        var response = await factory.CreateClient().GetAsync("/api/users/analysts");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Get_case_types_without_token_returns_unauthorized()
     {
         var response = await factory.CreateClient().GetAsync("/api/case-types");
@@ -109,6 +131,21 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         var response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Generic_status_endpoint_is_not_added()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/status", new
+        {
+            status = "Assigned",
+            reason = "Out of scope for PR-08."
+        });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
@@ -253,6 +290,302 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         var response = await client.GetAsync($"/api/cases/{Guid.NewGuid()}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Analyst_cannot_assign_case()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var analystId = await GetUserIdAsync("analyst2@opsflow.local");
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(analystId));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("manager@opsflow.local")]
+    [InlineData("admin@opsflow.local")]
+    public async Task Manager_and_admin_can_assign_case(string email)
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            $"PR-08 assign {email}",
+            caseTypeId,
+            createdById,
+            CaseStatus.New,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10));
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var client = await CreateAuthenticatedClientAsync(email);
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/assign",
+            AssignBody(analystId, "  Assigned for analyst review.  "));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<CaseDetailBody>();
+        Assert.NotNull(detail);
+        Assert.Equal(analystId, detail.AssignedTo?.Id);
+        Assert.Equal(nameof(CaseStatus.Assigned), detail.Status);
+        Assert.Equal(OpsFlowApiFactory.FixedNowUtc, detail.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public async Task Missing_case_assignment_returns_not_found()
+    {
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{Guid.NewGuid()}/assign", AssignBody(analystId));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Missing_assigned_to_user_id_returns_bad_request()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", new
+        {
+            reason = "Assigned for analyst review."
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Empty_assignment_reason_returns_bad_request(string reason)
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(analystId, reason));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Assignment_target_not_found_returns_bad_request()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(Guid.NewGuid()));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("manager@opsflow.local")]
+    [InlineData("admin@opsflow.local")]
+    public async Task Assignment_target_must_not_be_manager_or_admin(string email)
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var userId = await GetUserIdAsync(email);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(userId));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Assignment_target_must_be_active()
+    {
+        var inactiveAnalystId = await CreateInactiveAnalystAsync();
+        var caseId = await GetAnyCaseIdAsync();
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(inactiveAnalystId));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Same_assignee_assignment_returns_bad_request()
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-08 same assignee",
+            caseTypeId,
+            createdById,
+            CaseStatus.Assigned,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10),
+            analystId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(analystId));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Closed_case_assignment_returns_bad_request()
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-08 closed assignment",
+            caseTypeId,
+            createdById,
+            CaseStatus.Closed,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(-10));
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(analystId));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Valid_assignment_creates_history_audit_and_status_history_for_new_case()
+    {
+        var actorId = await GetUserIdAsync("manager@opsflow.local");
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-08 valid assignment",
+            caseTypeId,
+            actorId,
+            CaseStatus.New,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10));
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/assign",
+            AssignBody(analystId, "  Assigned for analyst review.  "));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var opsCase = await dbContext.Cases.SingleAsync(x => x.Id == caseId);
+        Assert.Equal(analystId, opsCase.AssignedToUserId);
+        Assert.Equal(CaseStatus.Assigned, opsCase.Status);
+
+        var assignmentHistory = await dbContext.AssignmentHistories.SingleAsync(x => x.CaseId == caseId);
+        Assert.Null(assignmentHistory.FromUserId);
+        Assert.Equal(analystId, assignmentHistory.ToUserId);
+        Assert.Equal(actorId, assignmentHistory.AssignedByUserId);
+        Assert.Equal("Assigned for analyst review.", assignmentHistory.Reason);
+        Assert.Equal(OpsFlowApiFactory.FixedNowUtc, assignmentHistory.CreatedAtUtc);
+
+        var auditLog = await dbContext.AuditLogs.SingleAsync(x =>
+            x.EntityType == "Case" &&
+            x.EntityId == caseId &&
+            x.Action == AuditAction.Assigned);
+        Assert.Equal(actorId, auditLog.ActorUserId);
+        Assert.Contains(analystId.ToString(), auditLog.MetadataJson);
+        Assert.Contains("Assigned for analyst review.", auditLog.MetadataJson);
+
+        var statusHistory = await dbContext.StatusHistories.SingleAsync(x =>
+            x.CaseId == caseId &&
+            x.FromStatus == CaseStatus.New &&
+            x.ToStatus == CaseStatus.Assigned);
+        Assert.Equal(actorId, statusHistory.ChangedByUserId);
+        Assert.Equal("Assigned for analyst review.", statusHistory.Reason);
+    }
+
+    [Fact]
+    public async Task Reassignment_creates_assignment_history_with_previous_assignee_without_status_change()
+    {
+        var actorId = await GetUserIdAsync("manager@opsflow.local");
+        var fromAnalystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var toAnalystId = await GetUserIdAsync("analyst2@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-08 reassignment",
+            caseTypeId,
+            actorId,
+            CaseStatus.InReview,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10),
+            fromAnalystId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(toAnalystId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var opsCase = await dbContext.Cases.SingleAsync(x => x.Id == caseId);
+        Assert.Equal(toAnalystId, opsCase.AssignedToUserId);
+        Assert.Equal(CaseStatus.InReview, opsCase.Status);
+
+        var assignmentHistory = await dbContext.AssignmentHistories.SingleAsync(x => x.CaseId == caseId);
+        Assert.Equal(fromAnalystId, assignmentHistory.FromUserId);
+        Assert.Equal(toAnalystId, assignmentHistory.ToUserId);
+        Assert.Equal(actorId, assignmentHistory.AssignedByUserId);
+        Assert.False(await dbContext.StatusHistories.AnyAsync(x => x.CaseId == caseId));
+    }
+
+    [Fact]
+    public async Task Timeline_includes_assigned_event_after_assignment()
+    {
+        var actorId = await GetUserIdAsync("manager@opsflow.local");
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-08 timeline assignment",
+            caseTypeId,
+            actorId,
+            CaseStatus.New,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10));
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+        var assignResponse = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(analystId));
+        Assert.Equal(HttpStatusCode.OK, assignResponse.StatusCode);
+
+        var response = await client.GetAsync($"/api/cases/{caseId}/timeline");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var timeline = await response.Content.ReadFromJsonAsync<IReadOnlyList<CaseTimelineItemBody>>();
+        Assert.NotNull(timeline);
+        Assert.Contains(timeline, x =>
+            x.Action == nameof(AuditAction.Assigned) &&
+            x.Description == "Assigned to Alex Analyst");
+    }
+
+    [Fact]
+    public async Task Analyst_cannot_get_analyst_lookup()
+    {
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.GetAsync("/api/users/analysts");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("manager@opsflow.local")]
+    [InlineData("admin@opsflow.local")]
+    public async Task Manager_and_admin_get_active_analysts_only(string email)
+    {
+        var inactiveAnalystId = await CreateInactiveAnalystAsync();
+        var managerId = await GetUserIdAsync("manager@opsflow.local");
+        var adminId = await GetUserIdAsync("admin@opsflow.local");
+        var client = await CreateAuthenticatedClientAsync(email);
+
+        var response = await client.GetAsync("/api/users/analysts");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var analysts = await response.Content.ReadFromJsonAsync<IReadOnlyList<AnalystLookupBody>>();
+        Assert.NotNull(analysts);
+        Assert.NotEmpty(analysts);
+        Assert.Contains(analysts, x => x.Email == "analyst1@opsflow.local");
+        Assert.DoesNotContain(analysts, x => x.Id == inactiveAnalystId);
+        Assert.DoesNotContain(analysts, x => x.Id == managerId);
+        Assert.DoesNotContain(analysts, x => x.Id == adminId);
+        Assert.Equal(
+            analysts.OrderBy(x => x.DisplayName, StringComparer.Ordinal).Select(x => x.Id),
+            analysts.Select(x => x.Id));
     }
 
     [Fact]
@@ -813,7 +1146,8 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         Guid caseTypeId,
         Guid createdByUserId,
         CaseStatus status,
-        DateTime dueAtUtc)
+        DateTime dueAtUtc,
+        Guid? assignedToUserId = null)
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
@@ -827,11 +1161,44 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
             CaseTypeId = caseTypeId,
             Priority = CasePriority.High,
             Status = status,
+            AssignedToUserId = assignedToUserId,
             CreatedByUserId = createdByUserId,
             DueAtUtc = dueAtUtc,
             ClosedAtUtc = status == CaseStatus.Closed ? OpsFlowApiFactory.FixedNowUtc : null,
             CreatedAtUtc = OpsFlowApiFactory.FixedNowUtc.AddHours(-2),
             UpdatedAtUtc = OpsFlowApiFactory.FixedNowUtc.AddHours(-1)
+        });
+        await dbContext.SaveChangesAsync();
+        return id;
+    }
+
+    private async Task<Guid> CreateInactiveAnalystAsync()
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var id = Guid.NewGuid();
+        var analystRoleId = await dbContext.Roles
+            .Where(x => x.Name == OpsFlowRoles.Analyst)
+            .Select(x => x.Id)
+            .SingleAsync();
+
+        dbContext.Users.Add(new AppUser
+        {
+            Id = id,
+            UserName = $"inactive-{id:N}@opsflow.local",
+            NormalizedUserName = $"INACTIVE-{id:N}@OPSFLOW.LOCAL",
+            Email = $"inactive-{id:N}@opsflow.local",
+            NormalizedEmail = $"INACTIVE-{id:N}@OPSFLOW.LOCAL",
+            EmailConfirmed = true,
+            DisplayName = "Inactive Analyst",
+            IsActive = false,
+            CreatedAtUtc = OpsFlowApiFactory.FixedNowUtc,
+            UpdatedAtUtc = OpsFlowApiFactory.FixedNowUtc
+        });
+        dbContext.UserRoles.Add(new IdentityUserRole<Guid>
+        {
+            UserId = id,
+            RoleId = analystRoleId
         });
         await dbContext.SaveChangesAsync();
         return id;
@@ -863,6 +1230,12 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
     private static object NoteBody(string body = "Reviewed the case and confirmed next action.") => new
     {
         body
+    };
+
+    private static object AssignBody(Guid assignedToUserId, string reason = "Assigned for analyst review.") => new
+    {
+        assignedToUserId,
+        reason
     };
 
     private sealed record LoginResponseBody(
@@ -910,6 +1283,11 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         [property: JsonPropertyName("actor")] SummaryBody? Actor,
         [property: JsonPropertyName("createdAtUtc")] DateTime CreatedAtUtc,
         [property: JsonPropertyName("description")] string Description);
+
+    private sealed record AnalystLookupBody(
+        [property: JsonPropertyName("id")] Guid Id,
+        [property: JsonPropertyName("displayName")] string DisplayName,
+        [property: JsonPropertyName("email")] string Email);
 
     private sealed record CaseTypeSummaryBody(
         [property: JsonPropertyName("id")] Guid Id,

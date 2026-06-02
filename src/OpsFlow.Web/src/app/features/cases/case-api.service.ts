@@ -3,6 +3,8 @@ import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
+  AnalystLookup,
+  AssignCaseRequest,
   CaseListItem,
   CaseListQuery,
   CaseDetail,
@@ -31,6 +33,14 @@ export class CaseApiService {
 
   getCase(id: string): Observable<CaseDetail> {
     return this.http.get<CaseDetail>(`/api/cases/${id}`);
+  }
+
+  assignCase(caseId: string, request: AssignCaseRequest): Observable<CaseDetail> {
+    return this.http.patch<CaseDetail>(`/api/cases/${caseId}/assign`, request);
+  }
+
+  getAnalysts(): Observable<AnalystLookup[]> {
+    return this.http.get<AnalystLookup[]>('/api/users/analysts');
   }
 
   getNotes(caseId: string): Observable<CaseNote[]> {

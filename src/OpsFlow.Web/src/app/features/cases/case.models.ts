@@ -92,9 +92,21 @@ export interface CreateCaseNoteRequest {
   body: string;
 }
 
+export interface AssignCaseRequest {
+  assignedToUserId: string;
+  reason: string;
+  rowVersion?: string;
+}
+
+export interface AnalystLookup {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
 export interface TimelineItem {
   id: string;
-  action: 'CaseCreated' | 'NoteAdded';
+  action: 'CaseCreated' | 'NoteAdded' | 'Assigned';
   actor: UserSummary | null;
   createdAtUtc: string;
   description: string;

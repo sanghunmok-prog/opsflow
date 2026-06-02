@@ -1,13 +1,14 @@
 import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
 
+import { AuthService } from '../../core/auth/auth.service';
 import { CaseApiService } from './case-api.service';
-import { CaseDetail, CaseNote, TimelineItem } from './case.models';
+import { AnalystLookup, CaseDetail, CaseNote, TimelineItem } from './case.models';
 
 @Component({
   selector: 'app-case-detail',
@@ -68,6 +69,60 @@ import { CaseDetail, CaseNote, TimelineItem } from './case.models';
             <p>{{ detail.dueAtUtc | date: 'medium' }}</p>
           </div>
         </section>
+
+        @if (canAssignCases()) {
+          <section class="panel assignment-panel" aria-label="Assignment">
+            <header class="panel-header">
+              <h2>Assignment</h2>
+            </header>
+
+            <div class="assignment-current">
+              <span>Current assignee</span>
+              <p>{{ detail.assignedTo?.displayName ?? 'Unassigned' }}</p>
+            </div>
+
+            @if (analystsLoading()) {
+              <div class="state compact">Loading analysts...</div>
+            } @else if (analystsError()) {
+              <div class="state compact error" role="alert">{{ analystsError() }}</div>
+            } @else {
+              <form [formGroup]="assignmentForm" (ngSubmit)="submitAssignment()" class="assignment-form">
+                <label>
+                  <span>Analyst</span>
+                  <select formControlName="assignedToUserId">
+                    <option value="">Select analyst</option>
+                    @for (analyst of analysts(); track analyst.id) {
+                      <option [value]="analyst.id">
+                        {{ analyst.displayName }} ({{ analyst.email }})
+                      </option>
+                    }
+                  </select>
+                </label>
+
+                <label>
+                  <span>Reason</span>
+                  <textarea formControlName="reason" rows="3" maxlength="500"></textarea>
+                </label>
+
+                @if (assignmentValidationMessage()) {
+                  <p class="form-error">{{ assignmentValidationMessage() }}</p>
+                }
+                @if (assignmentSaveMessage()) {
+                  <p class="form-success" role="status">{{ assignmentSaveMessage() }}</p>
+                }
+                @if (assignmentSaveError()) {
+                  <p class="form-error" role="alert">{{ assignmentSaveError() }}</p>
+                }
+
+                <div class="form-actions">
+                  <button type="submit" class="primary" [disabled]="assigningCase() || analysts().length === 0">
+                    {{ assigningCase() ? 'Assigning...' : assignmentButtonLabel() }}
+                  </button>
+                </div>
+              </form>
+            }
+          </section>
+        }
 
         <section class="content-grid">
           <section class="panel" aria-label="Notes">
@@ -258,12 +313,14 @@ import { CaseDetail, CaseNote, TimelineItem } from './case.models';
     }
 
     .note-form,
+    .assignment-form,
     label {
       display: grid;
       gap: 0.55rem;
     }
 
     button,
+    select,
     textarea {
       font: inherit;
     }
@@ -282,13 +339,38 @@ import { CaseDetail, CaseNote, TimelineItem } from './case.models';
       opacity: 0.6;
     }
 
+    select,
     textarea {
       width: 100%;
       border: 1px solid #c6d0d9;
       border-radius: 6px;
       color: #172026;
       padding: 0.65rem 0.7rem;
+    }
+
+    textarea {
       resize: vertical;
+    }
+
+    .assignment-panel {
+      gap: 0.85rem;
+    }
+
+    .assignment-current {
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .assignment-current span {
+      color: #4a5661;
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .assignment-current p {
+      color: #26323d;
+      font-weight: 750;
     }
 
     .primary {
@@ -407,26 +489,40 @@ import { CaseDetail, CaseNote, TimelineItem } from './case.models';
 })
 export class CaseDetailComponent {
   private readonly api = inject(CaseApiService);
+  private readonly authService = inject(AuthService);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
   private readonly fb = inject(FormBuilder);
 
   readonly caseDetail = signal<CaseDetail | null>(null);
+  readonly analysts = signal<AnalystLookup[]>([]);
   readonly notes = signal<CaseNote[]>([]);
   readonly timeline = signal<TimelineItem[]>([]);
   readonly detailLoading = signal(true);
+  readonly analystsLoading = signal(false);
   readonly notesLoading = signal(false);
   readonly timelineLoading = signal(false);
   readonly savingNote = signal(false);
+  readonly assigningCase = signal(false);
   readonly detailError = signal('');
+  readonly analystsError = signal('');
   readonly notesError = signal('');
   readonly timelineError = signal('');
   readonly noteValidationMessage = signal('');
   readonly noteSaveMessage = signal('');
   readonly noteSaveError = signal('');
+  readonly assignmentValidationMessage = signal('');
+  readonly assignmentSaveMessage = signal('');
+  readonly assignmentSaveError = signal('');
+  readonly canAssignCases = computed(() => this.authService.hasAnyRole(['Manager', 'Admin']));
 
   readonly noteForm = this.fb.nonNullable.group({
     body: ['', [Validators.required, Validators.maxLength(2000)]],
+  });
+
+  readonly assignmentForm = this.fb.nonNullable.group({
+    assignedToUserId: ['', [Validators.required]],
+    reason: ['', [Validators.required, Validators.maxLength(500)]],
   });
 
   private readonly caseId = this.route.snapshot.paramMap.get('id') ?? '';
@@ -434,6 +530,9 @@ export class CaseDetailComponent {
   constructor() {
     this.loadDetail();
     this.loadNotesAndTimeline();
+    if (this.canAssignCases()) {
+      this.loadAnalysts();
+    }
   }
 
   submitNote(): void {
@@ -471,8 +570,65 @@ export class CaseDetailComponent {
       });
   }
 
+  submitAssignment(): void {
+    this.assignmentValidationMessage.set('');
+    this.assignmentSaveMessage.set('');
+    this.assignmentSaveError.set('');
+
+    const assignedToUserId = this.assignmentForm.controls.assignedToUserId.value;
+    const reason = this.assignmentForm.controls.reason.value.trim();
+    const detail = this.caseDetail();
+
+    if (!assignedToUserId) {
+      this.assignmentValidationMessage.set('Analyst is required.');
+      return;
+    }
+
+    if (!reason) {
+      this.assignmentValidationMessage.set('Assignment reason is required.');
+      return;
+    }
+
+    if (reason.length > 500) {
+      this.assignmentValidationMessage.set('Assignment reason must be 500 characters or fewer.');
+      return;
+    }
+
+    this.assigningCase.set(true);
+    this.api
+      .assignCase(this.caseId, {
+        assignedToUserId,
+        reason,
+        rowVersion: detail?.rowVersion,
+      })
+      .pipe(
+        finalize(() => this.assigningCase.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updatedDetail) => {
+          this.caseDetail.set(updatedDetail);
+          this.assignmentForm.reset({ assignedToUserId: '', reason: '' });
+          this.assignmentSaveMessage.set('Assignment updated.');
+          this.loadDetail();
+          this.loadNotesAndTimeline();
+        },
+        error: (error: HttpErrorResponse) => {
+          this.assignmentSaveError.set(this.assignmentErrorMessage(error));
+        },
+      });
+  }
+
   actionLabel(action: TimelineItem['action']): string {
-    return action === 'CaseCreated' ? 'Case Created' : 'Note Added';
+    if (action === 'CaseCreated') {
+      return 'Case Created';
+    }
+
+    if (action === 'Assigned') {
+      return 'Assigned';
+    }
+
+    return 'Note Added';
   }
 
   private loadDetail(): void {
@@ -489,6 +645,24 @@ export class CaseDetailComponent {
         error: (error: HttpErrorResponse) => {
           this.caseDetail.set(null);
           this.detailError.set(this.friendlyAccessMessage(error));
+        },
+      });
+  }
+
+  private loadAnalysts(): void {
+    this.analystsLoading.set(true);
+    this.analystsError.set('');
+    this.api
+      .getAnalysts()
+      .pipe(
+        finalize(() => this.analystsLoading.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (analysts) => this.analysts.set(analysts),
+        error: () => {
+          this.analysts.set([]);
+          this.analystsError.set('Analysts could not be loaded. Try again.');
         },
       });
   }
@@ -534,5 +708,26 @@ export class CaseDetailComponent {
     }
 
     return 'Case information could not be loaded. Try again.';
+  }
+
+  assignmentButtonLabel(): string {
+    return this.caseDetail()?.assignedTo ? 'Reassign' : 'Assign';
+  }
+
+  private assignmentErrorMessage(error: HttpErrorResponse): string {
+    const serverMessage = error.error?.message;
+    if (typeof serverMessage === 'string' && serverMessage.trim()) {
+      return serverMessage;
+    }
+
+    if (error.status === 403) {
+      return 'You do not have permission to assign cases.';
+    }
+
+    if (error.status === 404) {
+      return 'Case was not found.';
+    }
+
+    return 'Assignment could not be saved. Try again.';
   }
 }

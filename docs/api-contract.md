@@ -1,6 +1,6 @@
 # API Contract
 
-The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, case notes, a basic business timeline, and an authenticated case type lookup for the Angular create form.
+The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, case notes, a basic business timeline, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -10,12 +10,14 @@ The API currently exposes health, authentication, role-aware case read endpoints
 | GET | `/api/cases` | Returns a paginated, filtered, sorted, role-aware case queue. |
 | GET | `/api/cases/{id}` | Returns accessible case detail by id. |
 | POST | `/api/cases` | Creates a new unassigned case as Manager/Admin. |
+| PATCH | `/api/cases/{caseId}/assign` | Assigns or reassigns a case to an active Analyst as Manager/Admin. |
 | GET | `/api/cases/{caseId}/notes` | Returns notes for an accessible case. |
 | POST | `/api/cases/{caseId}/notes` | Adds a plain text note to an accessible case. |
 | GET | `/api/cases/{caseId}/timeline` | Returns basic business audit timeline events for an accessible case. |
 | GET | `/api/case-types` | Returns active case type id/name pairs for dropdown lookup. |
+| GET | `/api/users/analysts` | Returns active Analysts for the assignment dropdown as Manager/Admin. |
 
-PR-07 implements the Angular case detail screen, notes, and basic audit timeline. Assignment, status transition, approval, dashboard endpoints, and admin configuration remain later PR scope.
+PR-08 implements Manager/Admin assignment and reassignment. Status transition, approval, dashboard endpoints, notifications, and admin configuration remain later PR scope.
 
 ## Case List
 
@@ -110,7 +112,12 @@ Response body:
 ]
 ```
 
-PR-07 timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated` and `NoteAdded` audit events only.
+Timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated`, `NoteAdded`, and `Assigned` audit events.
+
+Assigned events use simple descriptions such as:
+
+- `Assigned to Alex Analyst`
+- `Reassigned from Alex Analyst to Blair Analyst`
 
 ## Case Create
 
@@ -138,6 +145,32 @@ Creation behavior:
 
 The API sets `Status = New`, leaves `AssignedTo = null`, records `CreatedBy` from the authenticated user, generates an `OPF-YYYY-####` case number, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
 
+## Case Assignment
+
+`PATCH /api/cases/{caseId}/assign` requires the Manager or Admin role.
+
+Request body:
+
+```json
+{
+  "assignedToUserId": "00000000-0000-0000-0000-000000000000",
+  "reason": "Assigned for analyst review.",
+  "rowVersion": "base64-row-version"
+}
+```
+
+`rowVersion` may be supplied by clients but PR-08 does not enforce optimistic concurrency for assignment.
+
+Behavior:
+
+- Missing token: `401`
+- Analyst token: `403`
+- Missing case id: `404`
+- Missing assignee, empty reason, inactive/non-Analyst target, same assignee, or closed case: `400`
+- Success: `200` with refreshed case detail
+
+Successful assignment sets `AssignedToUserId`, updates `UpdatedAtUtc`, writes an `AssignmentHistory` row, and writes an `Assigned` business audit row. If the case was `New`, assignment changes status to `Assigned` and writes a `StatusHistory` row for `New -> Assigned`. Other statuses are not changed.
+
 ## Case Type Lookup
 
 `GET /api/case-types` requires authentication and returns active case types only.
@@ -155,9 +188,26 @@ Response body:
 
 No case type mutation endpoints are exposed.
 
+## Analyst Lookup
+
+`GET /api/users/analysts` requires the Manager or Admin role and returns active Analyst users only.
+
+Response body:
+
+```json
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "displayName": "Alex Analyst",
+    "email": "analyst1@opsflow.local"
+  }
+]
+```
+
+No user create, edit, delete, role management, or admin user configuration endpoints are exposed.
+
 ## Planned Contract Areas
 
-- Manager reassignment
 - Status workflow
 - Manager approval decisions
 - SQL-backed dashboard metrics
@@ -168,4 +218,4 @@ Case query and creation validation currently return simple `400` responses. Auth
 
 ## Current Boundary
 
-No assignment mutation, status transition, approval, dashboard, export, notification, note edit/delete, attachments, rich text, or case type administration endpoints are implemented in PR-07.
+No generic status transition, approval, dashboard, export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented in PR-08.

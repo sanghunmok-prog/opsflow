@@ -11,6 +11,7 @@ namespace OpsFlow.Api.Controllers;
 public sealed class CasesController(
     ICaseQueryService caseQueryService,
     ICaseCommandService caseCommandService,
+    ICaseAssignmentService caseAssignmentService,
     ICaseNoteService caseNoteService,
     ICaseTimelineService caseTimelineService) : ControllerBase
 {
@@ -69,6 +70,31 @@ public sealed class CasesController(
         catch (SlaRuleNotFoundException ex)
         {
             return UnprocessableEntity(new { message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{caseId:guid}/assign")]
+    [Authorize(Policy = OpsFlowPolicies.RequireManagerOrAdmin)]
+    public async Task<ActionResult<CaseDetailDto>> AssignCase(
+        Guid caseId,
+        [FromBody] AssignCaseRequest? request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await caseAssignmentService.AssignCaseAsync(caseId, request, cancellationToken));
+        }
+        catch (CaseNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (CaseAssignmentValidationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (CaseAccessDeniedException)
+        {
+            return Forbid();
         }
     }
 
