@@ -105,6 +105,50 @@ describe('CaseApiService', () => {
     });
   });
 
+  it('patches case assignment requests', () => {
+    service
+      .assignCase('case-1', {
+        assignedToUserId: 'analyst-1',
+        reason: 'Assigned for analyst review.',
+        rowVersion: 'AAAA',
+      })
+      .subscribe();
+
+    const request = httpMock.expectOne('/api/cases/case-1/assign');
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({
+      assignedToUserId: 'analyst-1',
+      reason: 'Assigned for analyst review.',
+      rowVersion: 'AAAA',
+    });
+    request.flush({
+      id: 'case-1',
+      caseNumber: 'OPF-2026-0001',
+      title: 'Vendor exception',
+      description: 'Synthetic internal case',
+      caseType: { id: 'case-type-1', name: 'Vendor Approval Issue' },
+      priority: 'High',
+      status: 'Assigned',
+      assignedTo: { id: 'analyst-1', displayName: 'Demo Analyst' },
+      createdBy: { id: 'manager-1', displayName: 'Demo Manager' },
+      createdAtUtc: '2026-06-01T00:00:00Z',
+      updatedAtUtc: '2026-06-01T01:00:00Z',
+      dueAtUtc: '2026-06-02T00:00:00Z',
+      isOverdue: false,
+      rowVersion: 'AAAB',
+    });
+  });
+
+  it('gets active analysts lookup', () => {
+    service.getAnalysts().subscribe();
+
+    const request = httpMock.expectOne('/api/users/analysts');
+    expect(request.request.method).toBe('GET');
+    request.flush([
+      { id: 'analyst-1', displayName: 'Demo Analyst', email: 'analyst1@opsflow.local' },
+    ]);
+  });
+
   it('gets case notes', () => {
     service.getNotes('case-1').subscribe();
 

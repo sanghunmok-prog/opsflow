@@ -15,6 +15,7 @@ using OpsFlow.Infrastructure.Auth;
 using OpsFlow.Infrastructure.Cases;
 using OpsFlow.Infrastructure.Data;
 using OpsFlow.Infrastructure.Data.Seed;
+using OpsFlow.Infrastructure.Users;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,10 +32,12 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddScoped<ICaseQueryService, EfCaseQueryService>();
 builder.Services.AddScoped<ICaseCommandService, EfCaseCommandService>();
+builder.Services.AddScoped<ICaseAssignmentService, EfCaseAssignmentService>();
 builder.Services.AddScoped<ICaseAccessService, EfCaseAccessService>();
 builder.Services.AddScoped<ICaseNoteService, EfCaseNoteService>();
 builder.Services.AddScoped<ICaseTimelineService, EfCaseTimelineService>();
 builder.Services.AddScoped<ISlaService, SlaService>();
+builder.Services.AddScoped<OpsFlow.Application.Users.IUserLookupService, EfUserLookupService>();
 builder.Services.AddControllers();
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
