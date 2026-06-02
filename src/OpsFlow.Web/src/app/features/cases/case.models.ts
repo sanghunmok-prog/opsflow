@@ -98,6 +98,12 @@ export interface AssignCaseRequest {
   rowVersion?: string;
 }
 
+export interface UpdateCaseStatusRequest {
+  targetStatus: CaseStatus;
+  reason: string;
+  rowVersion: string;
+}
+
 export interface AnalystLookup {
   id: string;
   displayName: string;
@@ -106,7 +112,7 @@ export interface AnalystLookup {
 
 export interface TimelineItem {
   id: string;
-  action: 'CaseCreated' | 'NoteAdded' | 'Assigned';
+  action: 'CaseCreated' | 'NoteAdded' | 'Assigned' | 'StatusChanged' | 'CaseReopened';
   actor: UserSummary | null;
   createdAtUtc: string;
   description: string;

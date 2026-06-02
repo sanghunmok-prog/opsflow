@@ -8,7 +8,7 @@ import { finalize, forkJoin } from 'rxjs';
 
 import { AuthService } from '../../core/auth/auth.service';
 import { CaseApiService } from './case-api.service';
-import { AnalystLookup, CaseDetail, CaseNote, TimelineItem } from './case.models';
+import { AnalystLookup, CaseDetail, CaseNote, CaseStatus, TimelineItem } from './case.models';
 
 @Component({
   selector: 'app-case-detail',
@@ -117,6 +117,56 @@ import { AnalystLookup, CaseDetail, CaseNote, TimelineItem } from './case.models
                 <div class="form-actions">
                   <button type="submit" class="primary" [disabled]="assigningCase() || analysts().length === 0">
                     {{ assigningCase() ? 'Assigning...' : assignmentButtonLabel() }}
+                  </button>
+                </div>
+              </form>
+            }
+          </section>
+        }
+
+        @if (canShowStatusPanel()) {
+          <section class="panel status-panel" aria-label="Status transition">
+            <header class="panel-header">
+              <h2>Status</h2>
+            </header>
+
+            <div class="assignment-current">
+              <span>Current status</span>
+              <p>{{ detail.status }}</p>
+            </div>
+
+            @if (allowedStatusTransitions().length === 0) {
+              <div class="state compact">{{ statusUnavailableMessage() }}</div>
+            } @else {
+              <form [formGroup]="statusForm" (ngSubmit)="submitStatusUpdate()" class="status-form">
+                <label>
+                  <span>Next status</span>
+                  <select formControlName="targetStatus">
+                    <option value="">Select status</option>
+                    @for (status of allowedStatusTransitions(); track status) {
+                      <option [value]="status">{{ status }}</option>
+                    }
+                  </select>
+                </label>
+
+                <label>
+                  <span>Reason</span>
+                  <textarea formControlName="reason" rows="3" maxlength="1000"></textarea>
+                </label>
+
+                @if (statusValidationMessage()) {
+                  <p class="form-error">{{ statusValidationMessage() }}</p>
+                }
+                @if (statusSaveMessage()) {
+                  <p class="form-success" role="status">{{ statusSaveMessage() }}</p>
+                }
+                @if (statusSaveError()) {
+                  <p class="form-error" role="alert">{{ statusSaveError() }}</p>
+                }
+
+                <div class="form-actions">
+                  <button type="submit" class="primary" [disabled]="updatingStatus()">
+                    {{ updatingStatus() ? 'Updating...' : 'Update Status' }}
                   </button>
                 </div>
               </form>
@@ -314,6 +364,7 @@ import { AnalystLookup, CaseDetail, CaseNote, TimelineItem } from './case.models
 
     .note-form,
     .assignment-form,
+    .status-form,
     label {
       display: grid;
       gap: 0.55rem;
@@ -352,7 +403,8 @@ import { AnalystLookup, CaseDetail, CaseNote, TimelineItem } from './case.models
       resize: vertical;
     }
 
-    .assignment-panel {
+    .assignment-panel,
+    .status-panel {
       gap: 0.85rem;
     }
 
@@ -504,6 +556,7 @@ export class CaseDetailComponent {
   readonly timelineLoading = signal(false);
   readonly savingNote = signal(false);
   readonly assigningCase = signal(false);
+  readonly updatingStatus = signal(false);
   readonly detailError = signal('');
   readonly analystsError = signal('');
   readonly notesError = signal('');
@@ -514,7 +567,35 @@ export class CaseDetailComponent {
   readonly assignmentValidationMessage = signal('');
   readonly assignmentSaveMessage = signal('');
   readonly assignmentSaveError = signal('');
+  readonly statusValidationMessage = signal('');
+  readonly statusSaveMessage = signal('');
+  readonly statusSaveError = signal('');
   readonly canAssignCases = computed(() => this.authService.hasAnyRole(['Manager', 'Admin']));
+  readonly canShowStatusPanel = computed(() => {
+    const detail = this.caseDetail();
+    if (!detail) {
+      return false;
+    }
+
+    if (this.authService.hasAnyRole(['Manager', 'Admin'])) {
+      return true;
+    }
+
+    const currentUser = this.authService.currentUser();
+    return this.authService.hasAnyRole(['Analyst']) && detail.assignedTo?.id === currentUser?.id;
+  });
+  readonly allowedStatusTransitions = computed<CaseStatus[]>(() => {
+    const detail = this.caseDetail();
+    if (!detail || !this.canShowStatusPanel()) {
+      return [];
+    }
+
+    if (this.authService.hasAnyRole(['Manager', 'Admin'])) {
+      return this.managerTransitions(detail);
+    }
+
+    return this.analystTransitions(detail.status);
+  });
 
   readonly noteForm = this.fb.nonNullable.group({
     body: ['', [Validators.required, Validators.maxLength(2000)]],
@@ -523,6 +604,11 @@ export class CaseDetailComponent {
   readonly assignmentForm = this.fb.nonNullable.group({
     assignedToUserId: ['', [Validators.required]],
     reason: ['', [Validators.required, Validators.maxLength(500)]],
+  });
+
+  readonly statusForm = this.fb.nonNullable.group({
+    targetStatus: ['', [Validators.required]],
+    reason: ['', [Validators.required, Validators.maxLength(1000)]],
   });
 
   private readonly caseId = this.route.snapshot.paramMap.get('id') ?? '';
@@ -619,6 +705,60 @@ export class CaseDetailComponent {
       });
   }
 
+  submitStatusUpdate(): void {
+    this.statusValidationMessage.set('');
+    this.statusSaveMessage.set('');
+    this.statusSaveError.set('');
+
+    const detail = this.caseDetail();
+    const targetStatus = this.statusForm.controls.targetStatus.value as CaseStatus | '';
+    const reason = this.statusForm.controls.reason.value.trim();
+
+    if (!detail) {
+      this.statusValidationMessage.set('Case detail is required.');
+      return;
+    }
+
+    if (!targetStatus) {
+      this.statusValidationMessage.set('Next status is required.');
+      return;
+    }
+
+    if (!reason) {
+      this.statusValidationMessage.set('Status reason is required.');
+      return;
+    }
+
+    if (reason.length > 1000) {
+      this.statusValidationMessage.set('Status reason must be 1000 characters or fewer.');
+      return;
+    }
+
+    this.updatingStatus.set(true);
+    this.api
+      .updateStatus(this.caseId, {
+        targetStatus,
+        reason,
+        rowVersion: detail.rowVersion,
+      })
+      .pipe(
+        finalize(() => this.updatingStatus.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updatedDetail) => {
+          this.caseDetail.set(updatedDetail);
+          this.statusForm.reset({ targetStatus: '', reason: '' });
+          this.statusSaveMessage.set('Status updated.');
+          this.loadDetail();
+          this.loadNotesAndTimeline();
+        },
+        error: (error: HttpErrorResponse) => {
+          this.statusSaveError.set(this.statusErrorMessage(error));
+        },
+      });
+  }
+
   actionLabel(action: TimelineItem['action']): string {
     if (action === 'CaseCreated') {
       return 'Case Created';
@@ -626,6 +766,14 @@ export class CaseDetailComponent {
 
     if (action === 'Assigned') {
       return 'Assigned';
+    }
+
+    if (action === 'StatusChanged') {
+      return 'Status Changed';
+    }
+
+    if (action === 'CaseReopened') {
+      return 'Case Reopened';
     }
 
     return 'Note Added';
@@ -729,5 +877,69 @@ export class CaseDetailComponent {
     }
 
     return 'Assignment could not be saved. Try again.';
+  }
+
+  private statusErrorMessage(error: HttpErrorResponse): string {
+    if (error.status === 409) {
+      return 'This case was updated by another user. Please refresh.';
+    }
+
+    const serverMessage = error.error?.message;
+    if (typeof serverMessage === 'string' && serverMessage.trim()) {
+      return serverMessage;
+    }
+
+    if (error.status === 403) {
+      return 'You do not have permission to update this case status.';
+    }
+
+    if (error.status === 404) {
+      return 'Case was not found.';
+    }
+
+    return 'Status could not be updated. Try again.';
+  }
+
+  private managerTransitions(detail: CaseDetail): CaseStatus[] {
+    switch (detail.status) {
+      case 'Assigned':
+        return ['InReview', 'WaitingInfo'];
+      case 'InReview':
+        return ['WaitingInfo', 'Resolved'];
+      case 'WaitingInfo':
+        return ['InReview', 'Resolved'];
+      case 'Resolved':
+        return detail.priority === 'Low' || detail.priority === 'Medium' ? ['Closed'] : [];
+      case 'Closed':
+        return ['Reopened'];
+      case 'Reopened':
+        return ['InReview', 'WaitingInfo'];
+      default:
+        return [];
+    }
+  }
+
+  private analystTransitions(status: CaseStatus): CaseStatus[] {
+    switch (status) {
+      case 'Assigned':
+        return ['InReview', 'WaitingInfo'];
+      case 'InReview':
+        return ['WaitingInfo', 'Resolved'];
+      case 'WaitingInfo':
+        return ['InReview', 'Resolved'];
+      case 'Reopened':
+        return ['InReview'];
+      default:
+        return [];
+    }
+  }
+
+  statusUnavailableMessage(): string {
+    const detail = this.caseDetail();
+    if (detail?.status === 'Resolved' && (detail.priority === 'High' || detail.priority === 'Critical')) {
+      return 'High/Critical closure requires approval workflow.';
+    }
+
+    return 'No status transitions are available.';
   }
 }
