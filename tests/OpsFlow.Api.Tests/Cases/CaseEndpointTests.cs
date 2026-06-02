@@ -43,6 +43,45 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Get_case_types_without_token_returns_unauthorized()
+    {
+        var response = await factory.CreateClient().GetAsync("/api/case-types");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authenticated_user_can_get_active_case_types()
+    {
+        var inactiveCaseTypeId = await CreateInactiveCaseTypeAsync();
+        var client = await CreateAuthenticatedClientAsync("analyst1@opsflow.local");
+
+        var response = await client.GetAsync("/api/case-types");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var caseTypes = await response.Content.ReadFromJsonAsync<IReadOnlyList<CaseTypeSummaryBody>>();
+        Assert.NotNull(caseTypes);
+        Assert.NotEmpty(caseTypes);
+        Assert.DoesNotContain(caseTypes, x => x.Id == inactiveCaseTypeId);
+        Assert.Equal(caseTypes.OrderBy(x => x.Name, StringComparer.Ordinal).Select(x => x.Id), caseTypes.Select(x => x.Id));
+    }
+
+    [Theory]
+    [InlineData("POST")]
+    [InlineData("PUT")]
+    [InlineData("PATCH")]
+    [InlineData("DELETE")]
+    public async Task Case_type_mutation_endpoints_are_not_added(string method)
+    {
+        var client = await CreateAuthenticatedClientAsync("admin@opsflow.local");
+        var request = new HttpRequestMessage(new HttpMethod(method), "/api/case-types");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Analyst_cannot_create_case()
     {
         var caseTypeId = await GetAnyCaseTypeIdAsync();
@@ -511,6 +550,25 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
             Name = $"PR-04 No SLA {Guid.NewGuid():N}",
             Description = "Case type without an active SLA rule.",
             IsActive = true,
+            CreatedAtUtc = OpsFlowApiFactory.FixedNowUtc,
+            UpdatedAtUtc = OpsFlowApiFactory.FixedNowUtc
+        };
+
+        dbContext.CaseTypes.Add(caseType);
+        await dbContext.SaveChangesAsync();
+        return caseType.Id;
+    }
+
+    private async Task<Guid> CreateInactiveCaseTypeAsync()
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OpsFlowDbContext>();
+        var caseType = new CaseType
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Inactive {Guid.NewGuid():N}",
+            Description = "Inactive case type for lookup tests.",
+            IsActive = false,
             CreatedAtUtc = OpsFlowApiFactory.FixedNowUtc,
             UpdatedAtUtc = OpsFlowApiFactory.FixedNowUtc
         };

@@ -1,6 +1,6 @@
 # API Contract
 
-The API currently exposes health, authentication, role-aware case read endpoints, and basic Manager/Admin case creation.
+The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, and an authenticated case type lookup for the Angular create form.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -10,8 +10,9 @@ The API currently exposes health, authentication, role-aware case read endpoints
 | GET | `/api/cases` | Returns a paginated, filtered, sorted, role-aware case queue. |
 | GET | `/api/cases/{id}` | Returns accessible case detail by id. |
 | POST | `/api/cases` | Creates a new unassigned case as Manager/Admin. |
+| GET | `/api/case-types` | Returns active case type id/name pairs for dropdown lookup. |
 
-PR-04 implements backend case creation and SLA/overdue calculation only. Notes, assignment, status transition, approval, audit timeline endpoints, dashboard endpoints, and Angular business screens remain later PR scope.
+PR-06 implements the Angular case queue screen and simple Manager/Admin create form. Notes, assignment, status transition, approval, audit timeline endpoints, dashboard endpoints, case detail UI, and admin configuration remain later PR scope.
 
 ## Case List
 
@@ -71,6 +72,23 @@ Creation behavior:
 
 The API sets `Status = New`, leaves `AssignedTo = null`, records `CreatedBy` from the authenticated user, generates an `OPF-YYYY-####` case number, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
 
+## Case Type Lookup
+
+`GET /api/case-types` requires authentication and returns active case types only.
+
+Response body:
+
+```json
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "name": "Vendor Approval Issue"
+  }
+]
+```
+
+No case type mutation endpoints are exposed.
+
 ## Planned Contract Areas
 
 - Notes and status workflow
@@ -85,4 +103,4 @@ Case query and creation validation currently return simple `400` responses. Auth
 
 ## Current Boundary
 
-No notes, assignment mutation, status transition, approval, dashboard, export, notification, or Angular business UI endpoints are implemented in PR-04.
+No notes, assignment mutation, status transition, approval, dashboard, export, notification, case detail UI, or case type administration endpoints are implemented in PR-06.
