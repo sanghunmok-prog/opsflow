@@ -35,6 +35,8 @@ export interface CaseListQuery {
   search?: string;
   status?: CaseStatus | '';
   priority?: CasePriority | '';
+  caseTypeId?: string;
+  assignedToUserId?: string;
   overdue?: boolean | null;
   sortBy: CaseSortBy;
   sortDirection: SortDirection;
