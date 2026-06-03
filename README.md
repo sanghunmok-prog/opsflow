@@ -6,7 +6,7 @@ OpsFlow is an industry-neutral enterprise case and exception management system f
 
 OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. PR-05 adds the Angular authentication shell, demo login flow, protected routes, and role-aware navigation. PR-07 adds case detail UI, plain text notes, and a basic business audit timeline. PR-08 adds Manager/Admin assignment and reassignment from case detail. PR-09 adds role-aware status transitions with history, business audit, and RowVersion concurrency. PR-10 adds the High/Critical closure approval workflow. PR-11 adds SQL/EF-backed dashboard summary metrics, breakdowns, and drill-down links.
+PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. PR-05 adds the Angular authentication shell, demo login flow, protected routes, and role-aware navigation. PR-07 adds case detail UI, plain text notes, and a basic business audit timeline. PR-08 adds Manager/Admin assignment and reassignment from case detail. PR-09 adds role-aware status transitions with history, business audit, and RowVersion concurrency. PR-10 adds the High/Critical closure approval workflow. PR-11 adds SQL/EF-backed dashboard summary metrics, breakdowns, and drill-down links. PR-12 hardens validation, assignment concurrency, regression coverage, and readable API/frontend errors.
 
 ## Tech Stack
 
@@ -28,7 +28,7 @@ Planned portfolio differentiators:
 - Audit logging
 - SQL-backed dashboard metrics
 
-These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, basic Manager/Admin case creation with SLA due dates, an Angular authentication shell, case detail UI, notes, a basic business audit timeline, Manager/Admin case assignment, role-aware status transitions, High/Critical closure approvals, and SQL-backed dashboard metrics. It does not implement PR-12 validation/ProblemDetails hardening or final screenshot/demo polish.
+These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, basic Manager/Admin case creation with SLA due dates, an Angular authentication shell, case detail UI, notes, a basic business audit timeline, Manager/Admin case assignment, role-aware status transitions, High/Critical closure approvals, SQL-backed dashboard metrics, and PR-12 validation/concurrency/error hardening. It does not implement final screenshot/demo polish.
 
 ## Local Setup
 
@@ -165,7 +165,7 @@ Authenticated users can load role-aware dashboard reporting through:
 - `GET /api/dashboard/summary`
 - `GET /api/dashboard/breakdowns`
 
-`POST /api/cases` accepts title, description, case type id, and priority only. The API sets `Status = New`, leaves `AssignedTo = null`, records the current user as creator, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
+`POST /api/cases` accepts required title and description, case type id, and priority only. The API sets `Status = New`, leaves `AssignedTo = null`, records the current user as creator, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
 
 `GET /api/cases` supports `page`, `pageSize`, `search`, `status`, `priority`, `caseTypeId`, `assignedToUserId`, `overdue`, `sortBy`, and `sortDirection`. Analysts are constrained server-side to their own assigned cases. Managers and Admins can read all cases and filter by assignee.
 

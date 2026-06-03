@@ -95,6 +95,10 @@ public sealed class CasesController(
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (CaseAssignmentConcurrencyException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
         catch (CaseAccessDeniedException)
         {
             return Forbid();

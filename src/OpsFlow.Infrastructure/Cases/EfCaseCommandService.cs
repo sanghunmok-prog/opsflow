@@ -26,12 +26,7 @@ public sealed class EfCaseCommandService(
         var userId = currentUser.UserId
             ?? throw new CaseCommandValidationException("The current user is not authenticated.");
         var title = NormalizeRequired(request.Title, "Title");
-        var description = request.Description?.Trim() ?? string.Empty;
-
-        if (description.Length > 4000)
-        {
-            throw new CaseCommandValidationException("Description must be 4000 characters or fewer.");
-        }
+        var description = NormalizeRequired(request.Description, "Description", maxLength: 4000);
 
         if (request.CaseTypeId is not { } caseTypeId || caseTypeId == Guid.Empty)
         {
@@ -127,7 +122,7 @@ public sealed class EfCaseCommandService(
         return $"{prefix}{maxSuffix + 1:0000}";
     }
 
-    private static string NormalizeRequired(string? value, string fieldName)
+    private static string NormalizeRequired(string? value, string fieldName, int maxLength = 200)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -135,9 +130,9 @@ public sealed class EfCaseCommandService(
         }
 
         var normalized = value.Trim();
-        if (normalized.Length > 200)
+        if (normalized.Length > maxLength)
         {
-            throw new CaseCommandValidationException($"{fieldName} must be 200 characters or fewer.");
+            throw new CaseCommandValidationException($"{fieldName} must be {maxLength} characters or fewer.");
         }
 
         return normalized;

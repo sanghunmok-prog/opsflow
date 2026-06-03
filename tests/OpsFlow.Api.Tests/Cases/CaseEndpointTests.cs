@@ -318,6 +318,60 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
     }
 
     [Fact]
+    public async Task Valid_assignment_with_row_version_returns_updated_row_version()
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-12 assignment row version success",
+            caseTypeId,
+            createdById,
+            CaseStatus.New,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10));
+        var rowVersion = await GetCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/assign",
+            AssignBody(analystId, rowVersion: rowVersion));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<CaseDetailBody>();
+        Assert.NotNull(detail);
+        Assert.Equal(analystId, detail.AssignedTo?.Id);
+        Assert.False(string.IsNullOrWhiteSpace(detail.RowVersion));
+        Assert.NotEqual(rowVersion, detail.RowVersion);
+    }
+
+    [Fact]
+    public async Task Stale_assignment_row_version_returns_conflict_with_readable_message()
+    {
+        var createdById = await GetUserIdAsync("manager@opsflow.local");
+        var fromAnalystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var toAnalystId = await GetUserIdAsync("analyst2@opsflow.local");
+        var caseTypeId = await GetAnyCaseTypeIdAsync();
+        var caseId = await CreateDirectCaseAsync(
+            "PR-12 stale assignment row version",
+            caseTypeId,
+            createdById,
+            CaseStatus.InReview,
+            OpsFlowApiFactory.FixedNowUtc.AddHours(10),
+            fromAnalystId);
+        var staleRowVersion = await GetCaseRowVersionAsync(caseId);
+        await TouchCaseRowVersionAsync(caseId);
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/assign",
+            AssignBody(toAnalystId, rowVersion: staleRowVersion));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var error = await ReadMessageBodyAsync(response);
+        Assert.Equal("This case was updated by another user. Please refresh.", error.Message);
+    }
+
+    [Fact]
     public async Task Missing_case_assignment_returns_not_found()
     {
         var analystId = await GetUserIdAsync("analyst1@opsflow.local");
@@ -354,6 +408,24 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         var response = await client.PatchAsJsonAsync($"/api/cases/{caseId}/assign", AssignBody(analystId, reason));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await ReadMessageBodyAsync(response);
+        Assert.Equal("Reason is required.", error.Message);
+    }
+
+    [Fact]
+    public async Task Invalid_assignment_row_version_returns_bad_request_with_readable_message()
+    {
+        var caseId = await GetAnyCaseIdAsync();
+        var analystId = await GetUserIdAsync("analyst1@opsflow.local");
+        var client = await CreateAuthenticatedClientAsync("manager@opsflow.local");
+
+        var response = await client.PatchAsJsonAsync(
+            $"/api/cases/{caseId}/assign",
+            AssignBody(analystId, rowVersion: "not-base64"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await ReadMessageBodyAsync(response);
+        Assert.Equal("Invalid rowVersion.", error.Message);
     }
 
     [Fact]
@@ -1845,6 +1917,26 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
             caseTypeId,
             priority = "High"
         });
+        var whitespaceTitle = await client.PostAsJsonAsync("/api/cases", new
+        {
+            title = "   ",
+            description = "Synthetic internal operations case.",
+            caseTypeId,
+            priority = "High"
+        });
+        var missingDescription = await client.PostAsJsonAsync("/api/cases", new
+        {
+            title = "Vendor onboarding exception",
+            caseTypeId,
+            priority = "High"
+        });
+        var whitespaceDescription = await client.PostAsJsonAsync("/api/cases", new
+        {
+            title = "Vendor onboarding exception",
+            description = "   ",
+            caseTypeId,
+            priority = "High"
+        });
         var invalidPriority = await client.PostAsJsonAsync("/api/cases", CreateCaseBody(caseTypeId, "Urgent"));
         var missingCaseType = await client.PostAsJsonAsync("/api/cases", new
         {
@@ -1857,10 +1949,16 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         var missingSla = await client.PostAsJsonAsync("/api/cases", CreateCaseBody(noSlaCaseTypeId, "High"));
 
         Assert.Equal(HttpStatusCode.BadRequest, missingTitle.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, whitespaceTitle.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, missingDescription.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, whitespaceDescription.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, invalidPriority.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, missingCaseType.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, unknownCaseType.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, missingSla.StatusCode);
+
+        var missingDescriptionError = await ReadMessageBodyAsync(missingDescription);
+        Assert.Equal("Description is required.", missingDescriptionError.Message);
     }
 
     [Fact]
@@ -2277,10 +2375,14 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
         body
     };
 
-    private static object AssignBody(Guid assignedToUserId, string reason = "Assigned for analyst review.") => new
+    private static object AssignBody(
+        Guid assignedToUserId,
+        string reason = "Assigned for analyst review.",
+        string? rowVersion = null) => new
     {
         assignedToUserId,
-        reason
+        reason,
+        rowVersion
     };
 
     private static object StatusBody(
@@ -2311,6 +2413,17 @@ public sealed class CaseEndpointTests(OpsFlowApiFactory factory) : IClassFixture
 
     private sealed record LoginResponseBody(
         [property: JsonPropertyName("accessToken")] string AccessToken);
+
+    private static async Task<MessageBody> ReadMessageBodyAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadFromJsonAsync<MessageBody>();
+        Assert.NotNull(body);
+        Assert.False(string.IsNullOrWhiteSpace(body.Message));
+        return body;
+    }
+
+    private sealed record MessageBody(
+        [property: JsonPropertyName("message")] string Message);
 
     private sealed record PagedCaseResponseBody(
         [property: JsonPropertyName("items")] IReadOnlyList<CaseListItemBody> Items,
