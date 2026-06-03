@@ -292,6 +292,10 @@ Goal:
 
 Implement dashboard reporting.
 
+Status:
+
+- Implemented in this PR-11 change.
+
 Scope:
 
 - open cases

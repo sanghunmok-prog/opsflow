@@ -114,6 +114,14 @@ export class CaseApiService {
       params = params.set('priority', query.priority);
     }
 
+    if (query.caseTypeId) {
+      params = params.set('caseTypeId', query.caseTypeId);
+    }
+
+    if (query.assignedToUserId) {
+      params = params.set('assignedToUserId', query.assignedToUserId);
+    }
+
     if (query.overdue !== null && query.overdue !== undefined) {
       params = params.set('overdue', String(query.overdue));
     }

@@ -1,6 +1,6 @@
 # API Contract
 
-The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, role-aware case status transitions, High/Critical closure approvals, case notes, a basic business timeline, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
+The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, role-aware case status transitions, High/Critical closure approvals, case notes, a basic business timeline, SQL-backed dashboard metrics, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -19,10 +19,12 @@ The API currently exposes health, authentication, role-aware case read endpoints
 | GET | `/api/cases/{caseId}/notes` | Returns notes for an accessible case. |
 | POST | `/api/cases/{caseId}/notes` | Adds a plain text note to an accessible case. |
 | GET | `/api/cases/{caseId}/timeline` | Returns basic business audit timeline events for an accessible case. |
+| GET | `/api/dashboard/summary` | Returns role-aware SQL-backed dashboard summary metrics. |
+| GET | `/api/dashboard/breakdowns` | Returns role-aware SQL-backed dashboard breakdowns. |
 | GET | `/api/case-types` | Returns active case type id/name pairs for dropdown lookup. |
 | GET | `/api/users/analysts` | Returns active Analysts for the assignment dropdown as Manager/Admin. |
 
-PR-09 implements status transitions with history, business audit, and RowVersion concurrency. PR-10 implements High/Critical closure approvals. Dashboard endpoints, notifications, and admin configuration remain later PR scope.
+PR-09 implements status transitions with history, business audit, and RowVersion concurrency. PR-10 implements High/Critical closure approvals. PR-11 implements SQL-backed dashboard metrics and drill-downs. Notifications and admin configuration remain out of scope.
 
 ## Case List
 
@@ -256,6 +258,50 @@ Behavior:
 - Invalid page/pageSize: `400`
 
 The response is `PagedResult<ApprovalQueueItemDto>` and includes pending approval id, case link data, priority, case status, request reason, requester, assignee, due date, query-time overdue flag, and latest case row version.
+
+## Dashboard
+
+`GET /api/dashboard/summary` and `GET /api/dashboard/breakdowns` require authentication.
+
+- Missing token: `401`
+- Analyst token: `200`, scoped to cases assigned to the current Analyst
+- Manager/Admin token: `200`, scoped globally
+
+Summary response body:
+
+```json
+{
+  "openCases": 42,
+  "overdueOpenCases": 7,
+  "pendingApprovals": 3,
+  "averageOpenAgeHours": 18.5,
+  "slaBreachRate": 0.1667
+}
+```
+
+Summary metrics are calculated from `Cases` and `ApprovalRequests` through EF queries. Open cases are cases where `Status != Closed`. Overdue open cases are open cases where `DueAtUtc` is earlier than the captured UTC query time. Pending approvals count only `ApprovalRequests` with `Status == Pending`. `slaBreachRate` is `overdueOpenCases / openCases`, or `0` when there are no open cases.
+
+Breakdowns response body:
+
+```json
+{
+  "byStatus": [
+    {
+      "key": "Assigned",
+      "label": "Assigned",
+      "count": 12,
+      "routeQuery": {
+        "status": "Assigned"
+      }
+    }
+  ],
+  "byPriority": [],
+  "byCaseType": [],
+  "byAssignee": []
+}
+```
+
+Breakdowns group accessible cases by status, priority, case type, and assignee. Route query values are intended for existing `/cases` drill-down links. The dashboard does not persist metrics, create a dashboard table, export reports, or use background jobs.
 
 ## Approval Decisions
 

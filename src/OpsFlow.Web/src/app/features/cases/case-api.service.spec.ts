@@ -29,6 +29,8 @@ describe('CaseApiService', () => {
         search: 'OPF-2026',
         status: 'Assigned',
         priority: 'High',
+        caseTypeId: 'case-type-1',
+        assignedToUserId: 'analyst-1',
         overdue: true,
         sortBy: 'dueAtUtc',
         sortDirection: 'asc',
@@ -43,6 +45,8 @@ describe('CaseApiService', () => {
         candidate.params.get('search') === 'OPF-2026' &&
         candidate.params.get('status') === 'Assigned' &&
         candidate.params.get('priority') === 'High' &&
+        candidate.params.get('caseTypeId') === 'case-type-1' &&
+        candidate.params.get('assignedToUserId') === 'analyst-1' &&
         candidate.params.get('overdue') === 'true' &&
         candidate.params.get('sortBy') === 'dueAtUtc' &&
         candidate.params.get('sortDirection') === 'asc',
