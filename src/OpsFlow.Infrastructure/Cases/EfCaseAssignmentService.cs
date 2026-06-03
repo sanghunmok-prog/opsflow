@@ -28,6 +28,7 @@ public sealed class EfCaseAssignmentService(
             ?? throw new CaseAccessDeniedException("The current user is not authenticated.");
         var assignedToUserId = NormalizeAssignedToUserId(request?.AssignedToUserId);
         var reason = NormalizeReason(request?.Reason);
+        var requestedRowVersion = NormalizeOptionalRowVersion(request?.RowVersion);
 
         var opsCase = await dbContext.Cases
             .SingleOrDefaultAsync(x => x.Id == caseId, cancellationToken);
@@ -35,6 +36,11 @@ public sealed class EfCaseAssignmentService(
         if (opsCase is null)
         {
             throw new CaseNotFoundException(caseId);
+        }
+
+        if (requestedRowVersion is not null && !opsCase.RowVersion.SequenceEqual(requestedRowVersion))
+        {
+            throw new CaseAssignmentConcurrencyException("This case was updated by another user. Please refresh.");
         }
 
         if (opsCase.Status == CaseStatus.Closed)
@@ -115,7 +121,21 @@ public sealed class EfCaseAssignmentService(
             CreatedAtUtc = nowUtc
         });
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        if (requestedRowVersion is not null)
+        {
+            dbContext.Entry(opsCase).Property(x => x.RowVersion).OriginalValue = requestedRowVersion;
+        }
+
+        SetNewRowVersionForInMemoryProvider(opsCase);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new CaseAssignmentConcurrencyException("This case was updated by another user. Please refresh.", ex);
+        }
 
         return await dbContext.Cases
             .AsNoTracking()
@@ -170,5 +190,30 @@ public sealed class EfCaseAssignmentService(
         }
 
         return normalized;
+    }
+
+    private static byte[]? NormalizeOptionalRowVersion(string? rowVersion)
+    {
+        if (string.IsNullOrWhiteSpace(rowVersion))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Convert.FromBase64String(rowVersion);
+        }
+        catch (FormatException)
+        {
+            throw new CaseAssignmentValidationException("Invalid rowVersion.");
+        }
+    }
+
+    private void SetNewRowVersionForInMemoryProvider(OpsCase opsCase)
+    {
+        if (dbContext.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
+        {
+            opsCase.RowVersion = Guid.NewGuid().ToByteArray();
+        }
     }
 }

@@ -7,6 +7,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
 
 import { AuthService } from '../../core/auth/auth.service';
+import { apiErrorMessage } from '../../core/http/api-error-message';
 import { CaseApiService } from './case-api.service';
 import { AnalystLookup, CaseDetail, CaseNote, CaseStatus, TimelineItem } from './case.models';
 
@@ -795,8 +796,13 @@ export class CaseDetailComponent {
           this.noteSaveMessage.set('Note added.');
           this.loadNotesAndTimeline();
         },
-        error: () => {
-          this.noteSaveError.set('Note could not be added. Try again.');
+        error: (error: HttpErrorResponse) => {
+          this.noteSaveError.set(
+            apiErrorMessage(error, 'Note could not be added. Try again.', {
+              403: 'You do not have permission to add notes to this case.',
+              404: 'Case was not found.',
+            }),
+          );
         },
       });
   }
@@ -815,6 +821,11 @@ export class CaseDetailComponent {
       return;
     }
 
+    if (!detail) {
+      this.assignmentValidationMessage.set('Case detail is required.');
+      return;
+    }
+
     if (!reason) {
       this.assignmentValidationMessage.set('Assignment reason is required.');
       return;
@@ -830,7 +841,7 @@ export class CaseDetailComponent {
       .assignCase(this.caseId, {
         assignedToUserId,
         reason,
-        rowVersion: detail?.rowVersion,
+        rowVersion: detail.rowVersion,
       })
       .pipe(
         finalize(() => this.assigningCase.set(false)),
@@ -1028,9 +1039,13 @@ export class CaseDetailComponent {
       )
       .subscribe({
         next: (analysts) => this.analysts.set(analysts),
-        error: () => {
+        error: (error: HttpErrorResponse) => {
           this.analysts.set([]);
-          this.analystsError.set('Analysts could not be loaded. Try again.');
+          this.analystsError.set(
+            apiErrorMessage(error, 'Analysts could not be loaded. Try again.', {
+              403: 'You do not have permission to load Analyst options.',
+            }),
+          );
         },
       });
   }
@@ -1083,41 +1098,19 @@ export class CaseDetailComponent {
   }
 
   private assignmentErrorMessage(error: HttpErrorResponse): string {
-    const serverMessage = error.error?.message;
-    if (typeof serverMessage === 'string' && serverMessage.trim()) {
-      return serverMessage;
-    }
-
-    if (error.status === 403) {
-      return 'You do not have permission to assign cases.';
-    }
-
-    if (error.status === 404) {
-      return 'Case was not found.';
-    }
-
-    return 'Assignment could not be saved. Try again.';
+    return apiErrorMessage(error, 'Assignment could not be saved. Try again.', {
+      403: 'You do not have permission to assign cases.',
+      404: 'Case was not found.',
+      409: 'This case was updated by another user. Please refresh.',
+    });
   }
 
   private statusErrorMessage(error: HttpErrorResponse): string {
-    if (error.status === 409) {
-      return 'This case was updated by another user. Please refresh.';
-    }
-
-    const serverMessage = error.error?.message;
-    if (typeof serverMessage === 'string' && serverMessage.trim()) {
-      return serverMessage;
-    }
-
-    if (error.status === 403) {
-      return 'You do not have permission to update this case status.';
-    }
-
-    if (error.status === 404) {
-      return 'Case was not found.';
-    }
-
-    return 'Status could not be updated. Try again.';
+    return apiErrorMessage(error, 'Status could not be updated. Try again.', {
+      403: 'You do not have permission to update this case status.',
+      404: 'Case was not found.',
+      409: 'This case was updated by another user. Please refresh.',
+    });
   }
 
   private submitApprovalDecision(action: 'approve' | 'reject', decisionReason: string | null): void {
@@ -1166,24 +1159,11 @@ export class CaseDetailComponent {
   }
 
   private approvalErrorMessage(error: HttpErrorResponse): string {
-    if (error.status === 409) {
-      return 'This case or approval was updated by another user. Please refresh.';
-    }
-
-    const serverMessage = error.error?.message;
-    if (typeof serverMessage === 'string' && serverMessage.trim()) {
-      return serverMessage;
-    }
-
-    if (error.status === 403) {
-      return 'You do not have permission to manage this approval.';
-    }
-
-    if (error.status === 404) {
-      return 'Approval or case was not found.';
-    }
-
-    return 'Approval action could not be saved. Try again.';
+    return apiErrorMessage(error, 'Approval action could not be saved. Try again.', {
+      403: 'You do not have permission to manage this approval.',
+      404: 'Approval or case was not found.',
+      409: 'This case or approval was updated by another user. Please refresh.',
+    });
   }
 
   private isHighPriorityApprovalCase(detail: CaseDetail): boolean {

@@ -1,4 +1,5 @@
 import { DatePipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -6,6 +7,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { finalize } from 'rxjs';
 
 import { AuthService } from '../../core/auth/auth.service';
+import { apiErrorMessage } from '../../core/http/api-error-message';
 import { CaseApiService } from './case-api.service';
 import {
   CaseListItem,
@@ -617,7 +619,7 @@ export class CasesComponent {
 
   readonly createForm = this.fb.nonNullable.group({
     title: ['', [Validators.required, Validators.maxLength(200)]],
-    description: ['', [Validators.maxLength(4000)]],
+    description: ['', [Validators.required, Validators.maxLength(4000)]],
     caseTypeId: ['', Validators.required],
     priority: ['', Validators.required],
   });
@@ -703,7 +705,7 @@ export class CasesComponent {
 
     if (this.createForm.invalid) {
       this.createForm.markAllAsTouched();
-      this.createValidationMessage.set('Title, case type, and priority are required.');
+      this.createValidationMessage.set('Title, description, case type, and priority are required.');
       return;
     }
 
@@ -727,8 +729,12 @@ export class CasesComponent {
           this.createForm.reset({ title: '', description: '', caseTypeId: '', priority: '' });
           this.refresh();
         },
-        error: () => {
-          this.createError.set('Case could not be created. Check the fields and try again.');
+        error: (error: HttpErrorResponse) => {
+          this.createError.set(
+            apiErrorMessage(error, 'Case could not be created. Check the fields and try again.', {
+              403: 'You do not have permission to create cases.',
+            }),
+          );
         },
       });
   }
@@ -748,11 +754,15 @@ export class CasesComponent {
           this.totalCount.set(result.totalCount);
           this.totalPages.set(Math.max(result.totalPages, 1));
         },
-        error: () => {
+        error: (error: HttpErrorResponse) => {
           this.cases.set([]);
           this.totalCount.set(0);
           this.totalPages.set(1);
-          this.error.set('Cases could not be loaded. Try refreshing the queue.');
+          this.error.set(
+            apiErrorMessage(error, 'Cases could not be loaded. Try refreshing the queue.', {
+              403: 'You do not have permission to view this case queue.',
+            }),
+          );
         },
       });
   }
@@ -763,7 +773,8 @@ export class CasesComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (caseTypes) => this.caseTypes.set(caseTypes),
-        error: () => this.createError.set('Case types could not be loaded. Try again.'),
+        error: (error: HttpErrorResponse) =>
+          this.createError.set(apiErrorMessage(error, 'Case types could not be loaded. Try again.')),
       });
   }
 

@@ -161,7 +161,7 @@ Creation behavior:
 - Missing active SLA rule: `422`
 - Success: `201`
 
-The API sets `Status = New`, leaves `AssignedTo = null`, records `CreatedBy` from the authenticated user, generates an `OPF-YYYY-####` case number, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
+Title and description are trimmed and required. The API sets `Status = New`, leaves `AssignedTo = null`, records `CreatedBy` from the authenticated user, generates an `OPF-YYYY-####` case number, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
 
 ## Case Assignment
 
@@ -177,15 +177,16 @@ Request body:
 }
 ```
 
-`rowVersion` may be supplied by clients but PR-08 does not enforce optimistic concurrency for assignment.
+`rowVersion` is supplied by the Angular case detail screen and is enforced when present.
 
 Behavior:
 
 - Missing token: `401`
 - Analyst token: `403`
 - Missing case id: `404`
-- Missing assignee, empty reason, inactive/non-Analyst target, same assignee, or closed case: `400`
-- Success: `200` with refreshed case detail
+- Missing assignee, empty reason, invalid row version, inactive/non-Analyst target, same assignee, or closed case: `400`
+- Stale supplied row version: `409`
+- Success: `200` with refreshed case detail and latest `rowVersion`
 
 Successful assignment sets `AssignedToUserId`, updates `UpdatedAtUtc`, writes an `AssignmentHistory` row, and writes an `Assigned` business audit row. If the case was `New`, assignment changes status to `Assigned` and writes a `StatusHistory` row for `New -> Assigned`. Other statuses are not changed.
 
@@ -377,14 +378,10 @@ Response body:
 
 No user create, edit, delete, role management, or admin user configuration endpoints are exposed.
 
-## Planned Contract Areas
+## Error Handling
 
-- SQL-backed dashboard metrics
-
-## Error Handling Placeholder
-
-Case query and creation validation currently return simple `400` responses. Authorization failures use standard `401`/`403` behavior. Status and approval stale-write detection return `409`. Broader Problem Details documentation remains later scope.
+Validation and business-rule failures return readable error messages using the current simple `{ "message": "..." }` shape where controllers handle application exceptions. Authorization failures use standard `401`/`403` behavior. Status, assignment, closure-request, and approval stale-write detection return `409`.
 
 ## Current Boundary
 
-No dashboard, export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented in PR-10.
+No export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented.

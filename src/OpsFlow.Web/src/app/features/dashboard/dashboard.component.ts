@@ -1,9 +1,11 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
 
 import { AuthService } from '../../core/auth/auth.service';
+import { apiErrorMessage } from '../../core/http/api-error-message';
 import { DashboardApiService } from './dashboard-api.service';
 import { DashboardBreakdownItem, DashboardBreakdowns, DashboardSummary } from './dashboard.models';
 
@@ -321,10 +323,14 @@ export class DashboardComponent {
           this.summary.set(summary);
           this.breakdowns.set(breakdowns);
         },
-        error: () => {
+        error: (error: HttpErrorResponse) => {
           this.summary.set(null);
           this.breakdowns.set(null);
-          this.error.set('Dashboard metrics could not be loaded. Try refreshing the page.');
+          this.error.set(
+            apiErrorMessage(error, 'Dashboard metrics could not be loaded. Try refreshing the page.', {
+              403: 'You do not have permission to view these dashboard metrics.',
+            }),
+          );
         },
       });
   }

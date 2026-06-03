@@ -44,7 +44,7 @@ export interface CaseListQuery {
 
 export interface CreateCaseRequest {
   title: string;
-  description?: string;
+  description: string;
   caseTypeId: string;
   priority: CasePriority | '';
 }
@@ -100,7 +100,7 @@ export interface CreateCaseNoteRequest {
 export interface AssignCaseRequest {
   assignedToUserId: string;
   reason: string;
-  rowVersion?: string;
+  rowVersion: string;
 }
 
 export interface UpdateCaseStatusRequest {

@@ -163,6 +163,23 @@ describe('CaseDetailComponent', () => {
     expect(api.assignedCases).toEqual([]);
   });
 
+  it('shows conflict message for stale assignment update', async () => {
+    auth.roles = ['Manager'];
+    api.assignmentError = new HttpErrorResponse({ status: 409 });
+    fixture = TestBed.createComponent(CaseDetailComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.assignmentForm.setValue({
+      assignedToUserId: 'analyst-2',
+      reason: 'Reassign for coverage.',
+    });
+    component.submitAssignment();
+
+    expect(component.assignmentSaveError()).toBe('This case was updated by another user. Please refresh.');
+  });
+
   it('submits status update with target status reason and rowVersion then refreshes timeline', async () => {
     auth.roles = ['Manager'];
     fixture = TestBed.createComponent(CaseDetailComponent);
@@ -305,13 +322,14 @@ class FakeCaseApiService {
   notesCalls = 0;
   timelineCalls = 0;
   addedNotes: string[] = [];
+  assignmentError: HttpErrorResponse | null = null;
   statusError: HttpErrorResponse | null = null;
   caseOverride: Partial<{ status: string; priority: string }> = {};
   assignedCases: Array<{
     caseId: string;
     assignedToUserId: string;
     reason: string;
-    rowVersion?: string;
+    rowVersion: string;
   }> = [];
   statusUpdates: Array<{
     caseId: string;
@@ -353,8 +371,12 @@ class FakeCaseApiService {
     ]);
   }
 
-  assignCase(caseId: string, request: { assignedToUserId: string; reason: string; rowVersion?: string }) {
+  assignCase(caseId: string, request: { assignedToUserId: string; reason: string; rowVersion: string }) {
     this.assignedCases.push({ caseId, ...request });
+    if (this.assignmentError) {
+      return throwError(() => this.assignmentError);
+    }
+
     return of({
       id: caseId,
       caseNumber: 'OPF-2026-0001',

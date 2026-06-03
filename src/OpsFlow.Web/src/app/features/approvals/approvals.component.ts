@@ -7,6 +7,7 @@ import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 
 import { AuthService } from '../../core/auth/auth.service';
+import { apiErrorMessage } from '../../core/http/api-error-message';
 import { CaseApiService } from '../cases/case-api.service';
 import { ApprovalQueueItem } from '../cases/case.models';
 
@@ -448,19 +449,9 @@ export class ApprovalsComponent {
   }
 
   private errorText(error: HttpErrorResponse): string {
-    if (error.status === 409) {
-      return 'This approval was updated by another user. Please refresh.';
-    }
-
-    const serverMessage = error.error?.message;
-    if (typeof serverMessage === 'string' && serverMessage.trim()) {
-      return serverMessage;
-    }
-
-    if (error.status === 403) {
-      return 'You do not have access to approval queue actions.';
-    }
-
-    return 'Approval queue could not be updated. Try again.';
+    return apiErrorMessage(error, 'Approval queue could not be updated. Try again.', {
+      403: 'You do not have access to approval queue actions.',
+      409: 'This approval was updated by another user. Please refresh.',
+    });
   }
 }
