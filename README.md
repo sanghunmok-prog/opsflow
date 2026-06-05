@@ -1,186 +1,166 @@
 # OpsFlow
 
-OpsFlow is an industry-neutral enterprise case and exception management system for internal operations teams.
+OpsFlow is a full-stack internal operations workflow system for managing cases, SLA risk, analyst assignments, role-based approval controls, business audit timelines, and SQL/EF-backed operational metrics. The API is the enforcement point for workflow transitions, object-level authorization, SLA calculation, approval gating, RowVersion concurrency checks, and consistent error responses.
 
-## Portfolio Goal
+Tech stack: ASP.NET Core Web API (.NET 10), Angular 21, SQL Server 2022, EF Core, ASP.NET Core Identity/JWT, xUnit, Docker Compose, GitHub Actions.
 
-OpsFlow is a 4-week portfolio project for .NET / C# / Angular / SQL Server full-stack developer roles. The goal is to demonstrate production-style delivery of an internal business workflow application: clean PR history, server-side workflow rules, authorization, relational data modeling, CI, documentation, and reproducible local setup.
+## Demo Preview
 
-PR-00 established the repository skeleton, application projects, local development wiring, and documentation placeholders. PR-01 added the SQL Server / EF Core database foundation and deterministic synthetic seed data. PR-01A aligns that foundation with ASP.NET Core Identity-backed users/roles and the locked OpsFlow workflow direction. PR-02 adds backend demo login, JWT issuing, `/api/auth/me`, and role authorization policies. PR-03 adds authenticated, role-aware backend case queue and case detail read APIs. PR-04 adds backend Manager/Admin case creation with SLA due date calculation and query-time overdue indicators. PR-05 adds the Angular authentication shell, demo login flow, protected routes, and role-aware navigation. PR-07 adds case detail UI, plain text notes, and a basic business audit timeline. PR-08 adds Manager/Admin assignment and reassignment from case detail. PR-09 adds role-aware status transitions with history, business audit, and RowVersion concurrency. PR-10 adds the High/Critical closure approval workflow. PR-11 adds SQL/EF-backed dashboard summary metrics, breakdowns, and drill-down links. PR-12 hardens validation, assignment concurrency, regression coverage, and readable API/frontend errors.
+![OpsFlow end-to-end Manager workflow](docs/assets/gifs/01-master-workflow.gif)
 
-## Tech Stack
+[Watch Full Demo Video in v1.0-demo Release](https://github.com/sanghunmok-prog/opsflow/releases/tag/v1.0-demo)
 
-- Backend: ASP.NET Core Web API on .NET 10
-- Frontend: Angular 21 and TypeScript
-- Database: SQL Server 2022 for local development
-- Data access: Entity Framework Core with ASP.NET Core Identity persistence
-- Tests: xUnit
-- Local orchestration: Docker Compose
-- CI: GitHub Actions
+End-to-end Manager workflow: dashboard metrics, approval queue, case detail, approval decision, and dashboard refresh.
 
-## Key Features
+## What OpsFlow Demonstrates
 
-Planned portfolio differentiators:
+- Role-based access with exactly three roles: `Analyst`, `Manager`, and `Admin`.
+- Object-level authorization that scopes Analysts to assigned cases.
+- Server-side queue filtering, pagination, sorting, search, and route query preservation.
+- SLA due dates and query-time overdue calculation.
+- Assignment, status transition, and High/Critical closure approval workflow.
+- Business audit timeline for case lifecycle events.
+- SQL/EF-backed operational dashboard metrics with drill-down links.
+- Backend xUnit coverage and Angular build/test coverage.
 
-- SLA tracking and overdue calculation
-- Role-based authorization with server-side enforcement
-- Manager approval workflow
-- Audit logging
-- SQL-backed dashboard metrics
+## Backend Guarantees
 
-These features are planned portfolio differentiators. The current foundation includes schema, deterministic seed data, backend authentication, role-aware case read APIs, basic Manager/Admin case creation with SLA due dates, an Angular authentication shell, case detail UI, notes, a basic business audit timeline, Manager/Admin case assignment, role-aware status transitions, High/Critical closure approvals, SQL-backed dashboard metrics, and PR-12 validation/concurrency/error hardening. It does not implement final screenshot/demo polish.
+- Analysts cannot access or mutate cases outside their assignment scope.
+- Manager/Admin-only actions are enforced by API policies.
+- High/Critical resolved cases require approval before closure.
+- `PendingApproval` is reserved for the approval workflow and cannot be set directly through the generic status endpoint.
+- Workflow mutations validate `RowVersion` according to endpoint policy.
+- Lifecycle actions write business audit timeline entries.
+- Dashboard metrics are derived from SQL/EF queries, not stored summary tables.
 
-## Local Setup
+## Workflow Highlights
 
-Prerequisites:
+### SQL-backed Dashboard -> Server-side Queue Drill-down
 
-- .NET SDK 10.0.x
-- Node.js 22.x and npm 10.x
-- Angular CLI 21.x
-- Docker Desktop with WSL integration
+![SQL-backed dashboard drill-down](docs/assets/gifs/02-dashboard-drilldown.gif)
 
-Initial verification commands:
+Dashboard metrics are calculated from SQL/EF-backed queries, and each breakdown links into the case queue with server-side filters, pagination, sorting, and role scope preserved.
+
+### Case Detail: SLA, Notes, Assignment, and Status Workflow
+
+![Case detail workflow with SLA and audit timeline](docs/assets/gifs/03-case-detail-workflow.gif)
+
+Case detail connects SLA due dates, query-time overdue state, notes, reassignment, status transitions, RowVersion-backed actions, and business timeline events.
+
+### High/Critical Closure Approval Gate
+
+![High/Critical Manager approval workflow](docs/assets/gifs/04-approval-workflow.gif)
+
+High and Critical cases cannot be closed through the normal status path. The API requires a closure request, Manager/Admin approval, status history, and audit timeline updates before the case reaches `Closed`.
+
+## SLA Model
+
+SLA rules are stored in SQL in `SlaRules` and are selected by `CaseTypeId + Priority`. Seeded target hours are priority-based across every active case type: Low = 120, Medium = 72, High = 24, Critical = 8.
+
+When a Manager/Admin creates a case, the API sets `DueAtUtc = CreatedAtUtc + TargetHours` from the active SLA rule. `IsOverdue` is not persisted. Queue, detail, approval queue, and dashboard reads derive overdue state at query time with:
+
+```text
+Status != Closed && nowUtc > DueAtUtc
+```
+
+The same interpretation applies to `WaitingInfo`, `Resolved`, `PendingApproval`, and `Reopened` cases until the case is closed.
+
+## Approval Workflow
+
+Low/Medium resolved cases can close through the normal status workflow. High/Critical resolved cases cannot be closed through `PATCH /api/cases/{caseId}/status`; the API rejects that transition and requires a closure request.
+
+A closure request moves the case from `Resolved` to `PendingApproval`, creates an `ApprovalRequest`, writes `StatusHistory`, and records `ClosureRequested` in the audit timeline. Manager/Admin approval moves the case to `Closed` and sets `ClosedAtUtc`; rejection returns the case to `InReview`. Both decisions write status history and audit events.
+
+## Architecture
+
+OpsFlow uses a single Angular frontend, a single ASP.NET Core Web API, EF Core, SQL Server, and ASP.NET Core Identity/JWT. Business logic is implemented in application/infrastructure services behind controller endpoints.
+
+```text
+src/OpsFlow.Api             HTTP endpoints, auth, policies, startup
+src/OpsFlow.Application     DTOs, service contracts, business exceptions
+src/OpsFlow.Domain          entities, enums, role constants
+src/OpsFlow.Infrastructure  EF Core, SQL Server persistence, Identity, seed data
+src/OpsFlow.Web             Angular UI
+tests/OpsFlow.Api.Tests     API, workflow, data, dashboard, auth tests
+```
+
+More detail:
+
+- [Architecture](docs/architecture.md)
+- [Workflow](docs/workflow.md)
+- [ERD](docs/erd.md)
+- [Data Model](docs/data-model.md)
+- [API Map](docs/api-map.md)
+- [API Contract](docs/api-contract.md)
+
+## Local Quick Start
+
+Run commands from the repository root.
+
+1. Start SQL Server:
+
+   ```bash
+   docker compose up -d
+   ```
+
+2. Run the API:
+
+   ```bash
+   dotnet run --project src/OpsFlow.Api/OpsFlow.Api.csproj --urls http://localhost:5080
+   ```
+
+3. Confirm health:
+
+   ```bash
+   curl http://localhost:5080/health
+   ```
+
+4. Run Angular:
+
+   ```bash
+   cd src/OpsFlow.Web
+   npm ci
+   npm start
+   ```
+
+5. Open `http://localhost:4200`.
+
+Seeded accounts use password `Password123!`.
+
+| Role | Email |
+| --- | --- |
+| Admin | `admin@opsflow.local` |
+| Manager | `manager@opsflow.local` |
+| Analyst | `analyst1@opsflow.local` |
+| Analyst | `analyst2@opsflow.local` |
+| Analyst | `analyst3@opsflow.local` |
+
+Full runbook: [Local Run](docs/local-run.md). Validation path: [Manual Smoke Checklist](docs/manual-smoke-checklist.md).
+
+## Validation Commands
 
 ```bash
 dotnet restore OpsFlow.sln
-dotnet build OpsFlow.sln
-dotnet test OpsFlow.sln
+dotnet build OpsFlow.sln --no-restore
+dotnet test OpsFlow.sln --no-build
+```
+
+```bash
 cd src/OpsFlow.Web
-npm install
+npm ci
 npm run build
-npm start
-cd ../..
-docker compose config
+npm test -- --watch=false
 ```
 
-## Local Database Setup
+## Quick Links
 
-Start SQL Server:
+- [Watch Full Demo Video in v1.0-demo Release](https://github.com/sanghunmok-prog/opsflow/releases/tag/v1.0-demo)
+- [Demo Script](docs/demo-script.md)
+- [GIF Capture Guidance](docs/assets/gifs/README.md)
+- [Local Run](docs/local-run.md)
+- [Manual Smoke Checklist](docs/manual-smoke-checklist.md)
+- [API Contract](docs/api-contract.md)
 
-```bash
-docker compose up -d
-```
+## Scope Boundaries
 
-Apply EF Core migrations:
-
-```bash
-dotnet ef database update \
-  --project src/OpsFlow.Infrastructure/OpsFlow.Infrastructure.csproj \
-  --startup-project src/OpsFlow.Api/OpsFlow.Api.csproj
-```
-
-Run the API in development mode to apply any pending migrations and seed local demo data:
-
-```bash
-dotnet run --project src/OpsFlow.Api/OpsFlow.Api.csproj
-```
-
-Run the Angular app with its local API proxy:
-
-```bash
-cd src/OpsFlow.Web
-npm start
-```
-
-The Angular development server proxies `/api` and `/health` to `http://localhost:5080`, so the API should be running on that backend URL for local login.
-
-The development connection string targets `localhost,1433` and database `OpsFlowDb`. Override it with standard ASP.NET Core configuration, for example:
-
-```bash
-ConnectionStrings__OpsFlowDb="Server=localhost,1433;Database=OpsFlowDb;User Id=sa;Password=<local-password>;TrustServerCertificate=True;Encrypt=True;" \
-dotnet run --project src/OpsFlow.Api/OpsFlow.Api.csproj
-```
-
-## Seed Data
-
-The development seeder is deterministic and safe to run repeatedly against an already-seeded database. It creates:
-
-- 5 demo users across Admin, Manager, and Analyst roles
-- exactly 3 Identity roles: Analyst, Manager, Admin
-- 6 case types
-- 24 SLA rules covering every case type and priority combination
-- 320 synthetic operations cases
-- Sample notes, status histories, assignment histories, approval requests, and audit logs
-
-PR-02 adds backend login and JWT issuing for these seeded demo users.
-
-## Demo Auth
-
-The backend exposes `POST /api/auth/login` for seeded demo users and `GET /api/auth/me` for the authenticated profile. Login returns a JWT bearer access token containing user identity, email, display name, and role claims.
-
-The Angular app exposes `/login`, stores the demo JWT access token in local storage under `opsflow_access_token`, restores the current user with `/api/auth/me` after refresh, and protects `/dashboard`, `/cases`, and `/approvals`. The dashboard page remains a placeholder until PR-11.
-
-Demo password for all accounts: `Password123!`
-
-| Role    | Email                  | Purpose                            |
-| ------- | ---------------------- | ---------------------------------- |
-| Admin   | admin@opsflow.local    | Full demo access                   |
-| Manager | manager@opsflow.local  | Approval and reassignment workflow |
-| Analyst | analyst1@opsflow.local | Assigned case workflow             |
-| Analyst | analyst2@opsflow.local | Assigned case workflow             |
-| Analyst | analyst3@opsflow.local | Assigned case workflow             |
-
-## Case API
-
-Authenticated users can read cases through:
-
-- `GET /api/cases`
-- `GET /api/cases/{id}`
-- `GET /api/cases/{caseId}/notes`
-- `GET /api/cases/{caseId}/timeline`
-
-Authenticated users can add plain text notes to accessible cases through:
-
-- `POST /api/cases/{caseId}/notes`
-
-Managers and Admins can create unassigned cases through:
-
-- `POST /api/cases`
-
-Managers and Admins can assign or reassign cases to active Analysts through:
-
-- `PATCH /api/cases/{caseId}/assign`
-
-Authorized users can update case status through the PR-09 transition matrix with RowVersion concurrency through:
-
-- `PATCH /api/cases/{caseId}/status`
-
-High/Critical resolved cases use the PR-10 manager approval workflow:
-
-- `POST /api/cases/{caseId}/closure-request`
-- `GET /api/approvals/pending`
-- `POST /api/approvals/{approvalId}/approve`
-- `POST /api/approvals/{approvalId}/reject`
-
-Authenticated users can load active case type dropdown options through:
-
-- `GET /api/case-types`
-
-Managers and Admins can load active Analyst dropdown options through:
-
-- `GET /api/users/analysts`
-
-Authenticated users can load role-aware dashboard reporting through:
-
-- `GET /api/dashboard/summary`
-- `GET /api/dashboard/breakdowns`
-
-`POST /api/cases` accepts required title and description, case type id, and priority only. The API sets `Status = New`, leaves `AssignedTo = null`, records the current user as creator, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
-
-`GET /api/cases` supports `page`, `pageSize`, `search`, `status`, `priority`, `caseTypeId`, `assignedToUserId`, `overdue`, `sortBy`, and `sortDirection`. Analysts are constrained server-side to their own assigned cases. Managers and Admins can read all cases and filter by assignee.
-
-These endpoints return DTOs only. They include query-time `isOverdue`, plain text notes, assignment to active Analysts, PR-09 status transition rules, PR-10 High/Critical closure approval actions, SQL-backed PR-11 dashboard metrics, and `CaseCreated` / `NoteAdded` / `Assigned` / `StatusChanged` / `ClosureRequested` / `ApprovalApproved` / `ApprovalRejected` / `CaseReopened` business timeline events. They do not expose note edit/delete, attachments, Identity internals, user management, case type mutation, notification behavior, export/reporting builders, or background workers.
-
-## Screenshots
-
-Screenshots will be added as the Angular workflow screens are implemented.
-
-## Architecture And Data Model
-
-- Architecture notes: [docs/architecture.md](docs/architecture.md)
-- API contract notes: [docs/api-contract.md](docs/api-contract.md)
-- PR plan: [docs/pr-plan.md](docs/pr-plan.md)
-- Demo script: [docs/demo-script.md](docs/demo-script.md)
-- Data model: [docs/data-model.md](docs/data-model.md)
-
-The database schema was introduced in PR-01 and corrected in PR-01A. Case read, notes, assignment, status transition, approval, business timeline, and dashboard API contracts are available now.
+OpsFlow intentionally focuses on a single internal workflow application: case intake, SLA risk, assignment, status workflow, High/Critical approval control, audit timeline, SQL-backed metrics, and reproducible local validation. It does not include distributed services, background escalation processing, exports, notifications, real-time messaging, payment flows, healthcare data, or large administrative configuration screens.
