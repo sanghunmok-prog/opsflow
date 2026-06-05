@@ -1,387 +1,450 @@
 # API Contract
 
-The API currently exposes health, authentication, role-aware case read endpoints, basic Manager/Admin case creation, Manager/Admin case assignment, role-aware case status transitions, High/Critical closure approvals, case notes, a basic business timeline, SQL-backed dashboard metrics, an authenticated case type lookup, and a Manager/Admin active Analyst lookup.
+OpsFlow API enforces authentication, role/object authorization, workflow transitions, SLA calculation, RowVersion concurrency checks, business audit timeline writes, and SQL-backed dashboard metrics.
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| GET | `/health` | Confirms the API process is running. |
-| POST | `/api/auth/login` | Issues a JWT bearer token for seeded demo users. |
-| GET | `/api/auth/me` | Returns the authenticated user profile and roles. |
-| GET | `/api/cases` | Returns a paginated, filtered, sorted, role-aware case queue. |
-| GET | `/api/cases/{id}` | Returns accessible case detail by id. |
-| POST | `/api/cases` | Creates a new unassigned case as Manager/Admin. |
-| PATCH | `/api/cases/{caseId}/assign` | Assigns or reassigns a case to an active Analyst as Manager/Admin. |
-| PATCH | `/api/cases/{caseId}/status` | Updates case status through the PR-09 transition matrix. |
-| POST | `/api/cases/{caseId}/closure-request` | Requests Manager/Admin closure approval for a Resolved High/Critical case. |
-| GET | `/api/approvals/pending` | Returns the Manager/Admin pending approval queue. |
-| POST | `/api/approvals/{approvalId}/approve` | Approves a pending closure request and closes the case. |
-| POST | `/api/approvals/{approvalId}/reject` | Rejects a pending closure request and returns the case to InReview. |
-| GET | `/api/cases/{caseId}/notes` | Returns notes for an accessible case. |
-| POST | `/api/cases/{caseId}/notes` | Adds a plain text note to an accessible case. |
-| GET | `/api/cases/{caseId}/timeline` | Returns basic business audit timeline events for an accessible case. |
-| GET | `/api/dashboard/summary` | Returns role-aware SQL-backed dashboard summary metrics. |
-| GET | `/api/dashboard/breakdowns` | Returns role-aware SQL-backed dashboard breakdowns. |
-| GET | `/api/case-types` | Returns active case type id/name pairs for dropdown lookup. |
-| GET | `/api/users/analysts` | Returns active Analysts for the assignment dropdown as Manager/Admin. |
+Base local API URL: `http://localhost:5080`.
 
-PR-09 implements status transitions with history, business audit, and RowVersion concurrency. PR-10 implements High/Critical closure approvals. PR-11 implements SQL-backed dashboard metrics and drill-downs. Notifications and admin configuration remain out of scope.
+## Endpoint Summary
 
-## Case List
+| Method | Route | Purpose | Authorization |
+| --- | --- | --- | --- |
+| `GET` | `/health` | Health check | Anonymous |
+| `POST` | `/api/auth/login` | Issue JWT | Anonymous |
+| `GET` | `/api/auth/me` | Current user | Authenticated |
+| `GET` | `/api/cases` | Case queue | Analyst, Manager, Admin |
+| `POST` | `/api/cases` | Create case | Manager, Admin |
+| `GET` | `/api/cases/{caseId}` | Case detail | Analyst assigned to case, Manager, Admin |
+| `PATCH` | `/api/cases/{caseId}/assign` | Assign/reassign | Manager, Admin |
+| `PATCH` | `/api/cases/{caseId}/status` | Status transition | Analyst assigned to case, Manager, Admin |
+| `POST` | `/api/cases/{caseId}/closure-request` | Request closure approval | Analyst assigned to case, Manager, Admin |
+| `GET` | `/api/cases/{caseId}/notes` | List notes | Analyst assigned to case, Manager, Admin |
+| `POST` | `/api/cases/{caseId}/notes` | Add note | Analyst assigned to case, Manager, Admin |
+| `GET` | `/api/cases/{caseId}/timeline` | Timeline | Analyst assigned to case, Manager, Admin |
+| `GET` | `/api/approvals/pending` | Pending approvals | Manager, Admin |
+| `POST` | `/api/approvals/{approvalId}/approve` | Approve closure | Manager, Admin |
+| `POST` | `/api/approvals/{approvalId}/reject` | Reject closure | Manager, Admin |
+| `GET` | `/api/dashboard/summary` | Dashboard summary | Analyst, Manager, Admin |
+| `GET` | `/api/dashboard/breakdowns` | Dashboard breakdowns | Analyst, Manager, Admin |
+| `GET` | `/api/case-types` | Active case types | Authenticated |
+| `GET` | `/api/users/analysts` | Active Analysts | Manager, Admin |
 
-`GET /api/cases` requires authentication.
+## Common DTOs
 
-Supported query parameters:
-
-- `page`: default `1`, must be at least `1`
-- `pageSize`: default `20`, must be between `1` and `100`
-- `search`: trims input and matches case number, title, or description
-- `status`: `New`, `Assigned`, `InReview`, `WaitingInfo`, `Resolved`, `PendingApproval`, `Closed`, or `Reopened`
-- `priority`: `Critical`, `High`, `Medium`, or `Low`
-- `caseTypeId`: case type id
-- `assignedToUserId`: Manager/Admin only unless it matches the current Analyst user id
-- `overdue`: `true` for open overdue cases, `false` for cases that are not overdue
-- `sortBy`: `caseNumber`, `createdAtUtc`, `dueAtUtc`, `priority`, or `status`
-- `sortDirection`: `asc` or `desc`
-
-Analysts are always constrained to `AssignedToUserId == currentUserId`. Managers and Admins can read all matching cases.
-
-List items include query-time `isOverdue`, calculated as `Status != Closed && nowUtc > dueAtUtc`.
-
-## Case Detail
-
-`GET /api/cases/{id}` requires authentication.
-
-- Missing token: `401`
-- Missing case id: `404`
-- Existing case outside Analyst assignment scope: `403`
-- Accessible case: `200`
-
-Detail responses include case metadata, case type summary, assigned user summary, created-by user summary, timestamps, due date, query-time `isOverdue`, and base64 row version.
-
-## Case Notes
-
-`GET /api/cases/{caseId}/notes` and `POST /api/cases/{caseId}/notes` require authentication and enforce the same object-level access rules as case detail.
-
-- Missing token: `401`
-- Missing case id: `404`
-- Existing case outside Analyst assignment scope: `403`
-- Accessible case: `200` for reads, `201` for successful note creation
-
-GET response body:
+`PagedResult<T>`:
 
 ```json
-[
-  {
-    "id": "00000000-0000-0000-0000-000000000000",
-    "body": "Reviewed the case and confirmed next action.",
-    "createdBy": {
-      "id": "00000000-0000-0000-0000-000000000000",
-      "displayName": "Alex Analyst"
-    },
-    "createdAtUtc": "2026-05-22T14:30:00Z"
+{
+  "items": [],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 0,
+  "totalPages": 0
+}
+```
+
+`UserSummaryDto`:
+
+```json
+{ "id": "guid", "displayName": "Morgan Manager" }
+```
+
+`CaseTypeSummaryDto`:
+
+```json
+{ "id": "guid", "name": "Vendor Approval Issue" }
+```
+
+`CaseListItemDto`:
+
+```json
+{
+  "id": "guid",
+  "caseNumber": "OPF-2026-0046",
+  "title": "Vendor Approval Issue for customer account #0046",
+  "caseType": { "id": "guid", "name": "Vendor Approval Issue" },
+  "priority": "High",
+  "status": "PendingApproval",
+  "assignedTo": { "id": "guid", "displayName": "Alex Analyst" },
+  "createdAtUtc": "2026-06-04T09:00:00Z",
+  "dueAtUtc": "2026-06-05T09:00:00Z",
+  "isOverdue": false
+}
+```
+
+`CaseDetailDto`:
+
+```json
+{
+  "id": "guid",
+  "caseNumber": "OPF-2026-0046",
+  "title": "Vendor Approval Issue for customer account #0046",
+  "description": "Operational exception details.",
+  "caseType": { "id": "guid", "name": "Vendor Approval Issue" },
+  "priority": "High",
+  "status": "PendingApproval",
+  "assignedTo": { "id": "guid", "displayName": "Alex Analyst" },
+  "createdBy": { "id": "guid", "displayName": "Morgan Manager" },
+  "createdAtUtc": "2026-06-04T09:00:00Z",
+  "updatedAtUtc": "2026-06-04T13:00:00Z",
+  "dueAtUtc": "2026-06-05T09:00:00Z",
+  "closedAtUtc": null,
+  "isOverdue": false,
+  "rowVersion": "AAAAAAAAB9E=",
+  "approvalSummary": {
+    "approvalId": "guid",
+    "status": "Pending",
+    "requestReason": "Work is complete.",
+    "requestedBy": { "id": "guid", "displayName": "Alex Analyst" },
+    "requestedAtUtc": "2026-06-04T13:00:00Z",
+    "decisionReason": null,
+    "reviewedBy": null,
+    "decisionAtUtc": null
   }
-]
-```
-
-POST request body:
-
-```json
-{
-  "body": "Reviewed the case and confirmed next action."
 }
 ```
 
-Note bodies are trimmed, required, plain text, and limited to 2000 characters. Empty or whitespace-only bodies return `400`. Successful creation writes both a `CaseNote` row and a `NoteAdded` business audit row.
-
-## Case Timeline
-
-`GET /api/cases/{caseId}/timeline` requires authentication and enforces the same object-level access rules as case detail.
-
-- Missing token: `401`
-- Missing case id: `404`
-- Existing case outside Analyst assignment scope: `403`
-- Accessible case: `200`
-
-Response body:
-
-```json
-[
-  {
-    "id": "00000000-0000-0000-0000-000000000000",
-    "action": "CaseCreated",
-    "actor": {
-      "id": "00000000-0000-0000-0000-000000000000",
-      "displayName": "Morgan Manager"
-    },
-    "createdAtUtc": "2026-05-22T14:00:00Z",
-    "description": "Case created"
-  }
-]
-```
-
-Timeline output is ordered by `createdAtUtc` ascending and includes `CaseCreated`, `NoteAdded`, `Assigned`, `StatusChanged`, `ClosureRequested`, `ApprovalApproved`, `ApprovalRejected`, and `CaseReopened` audit events.
-
-Assigned events use simple descriptions such as:
-
-- `Assigned to Alex Analyst`
-- `Reassigned from Alex Analyst to Blair Analyst`
-
-Status events use simple descriptions such as:
-
-- `Status changed from Assigned to InReview`
-- `Case reopened`
-
-Approval events use simple descriptions such as:
-
-- `Closure approval requested`
-- `Closure approved`
-- `Closure rejected`
-
-## Case Create
-
-`POST /api/cases` requires the Manager or Admin role.
-
-Request body:
+`ApprovalQueueItemDto`:
 
 ```json
 {
-  "title": "Vendor onboarding exception",
-  "description": "Synthetic internal operations case.",
-  "caseTypeId": "00000000-0000-0000-0000-000000000000",
-  "priority": "High"
+  "id": "guid",
+  "caseId": "guid",
+  "caseNumber": "OPF-2026-0046",
+  "caseTitle": "Vendor Approval Issue for customer account #0046",
+  "priority": "High",
+  "caseStatus": "PendingApproval",
+  "requestReason": "Work is complete.",
+  "requestedBy": { "id": "guid", "displayName": "Alex Analyst" },
+  "requestedAtUtc": "2026-06-04T13:00:00Z",
+  "assignedTo": { "id": "guid", "displayName": "Alex Analyst" },
+  "dueAtUtc": "2026-06-05T09:00:00Z",
+  "isOverdue": false,
+  "rowVersion": "AAAAAAAAB9E="
 }
 ```
 
-Creation behavior:
-
-- Missing token: `401`
-- Analyst token: `403`
-- Invalid request: `400`
-- Missing case type: `404`
-- Missing active SLA rule: `422`
-- Success: `201`
-
-Title and description are trimmed and required. The API sets `Status = New`, leaves `AssignedTo = null`, records `CreatedBy` from the authenticated user, generates an `OPF-YYYY-####` case number, calculates `DueAtUtc` from the active SLA rule, and writes a `CaseCreated` business audit row.
-
-## Case Assignment
-
-`PATCH /api/cases/{caseId}/assign` requires the Manager or Admin role.
-
-Request body:
-
-```json
-{
-  "assignedToUserId": "00000000-0000-0000-0000-000000000000",
-  "reason": "Assigned for analyst review.",
-  "rowVersion": "base64-row-version"
-}
-```
-
-`rowVersion` is supplied by the Angular case detail screen and is enforced when present.
-
-Behavior:
-
-- Missing token: `401`
-- Analyst token: `403`
-- Missing case id: `404`
-- Missing assignee, empty reason, invalid row version, inactive/non-Analyst target, same assignee, or closed case: `400`
-- Stale supplied row version: `409`
-- Success: `200` with refreshed case detail and latest `rowVersion`
-
-Successful assignment sets `AssignedToUserId`, updates `UpdatedAtUtc`, writes an `AssignmentHistory` row, and writes an `Assigned` business audit row. If the case was `New`, assignment changes status to `Assigned` and writes a `StatusHistory` row for `New -> Assigned`. Other statuses are not changed.
-
-## Case Status Transition
-
-`PATCH /api/cases/{caseId}/status` requires authentication.
-
-Request body:
-
-```json
-{
-  "targetStatus": "InReview",
-  "reason": "Started review after assignment.",
-  "rowVersion": "base64-row-version"
-}
-```
-
-Behavior:
-
-- Missing token: `401`
-- Analyst outside assignment scope: `403`
-- Missing case id: `404`
-- Missing target status, empty reason, missing/invalid row version, or same status: `400`
-- Stale row version: `409`
-- Disallowed business transition: `422`
-- Success: `200` with refreshed case detail and new `rowVersion`
-
-Analysts can transition only their assigned cases through allowed non-close/non-reopen workflow steps. Managers and Admins can transition any case according to the PR-09 matrix, including closing Low/Medium resolved cases and reopening closed cases.
-
-High/Critical `Resolved -> Closed` is blocked in the status endpoint and must go through the PR-10 approval workflow.
-
-Successful status transitions update `Cases.Status`, write `StatusHistory`, and write a business audit event: `StatusChanged` for normal status changes or `CaseReopened` for `Closed -> Reopened`.
-
-`PATCH /api/cases/{caseId}/status` still cannot transition directly into `PendingApproval`. High/Critical `Resolved -> Closed` must use the approval workflow. Low/Medium resolved cases can close through this status endpoint.
-
-## Closure Request
-
-`POST /api/cases/{caseId}/closure-request` requires authentication and enforces object-level access.
-
-Request body:
-
-```json
-{
-  "requestReason": "Work is complete and ready for manager closure review.",
-  "rowVersion": "base64-case-row-version"
-}
-```
-
-Behavior:
-
-- Missing token: `401`
-- Assigned Analyst for their own Resolved High/Critical case: `200`
-- Analyst outside assignment scope: `403`
-- Manager/Admin for any Resolved High/Critical case: `200`
-- Missing case id: `404`
-- Empty reason, invalid row version, Low/Medium case, or non-Resolved case: `400`
-- Stale row version or duplicate pending approval: `409`
-
-Successful requests set the case status to `PendingApproval`, create a pending `ApprovalRequest`, write `StatusHistory` for `Resolved -> PendingApproval`, and write a `ClosureRequested` business audit event.
-
-## Pending Approvals
-
-`GET /api/approvals/pending?page=1&pageSize=20` requires the Manager or Admin role.
-
-Behavior:
-
-- Missing token: `401`
-- Analyst token: `403`
-- Manager/Admin token: `200`
-- Invalid page/pageSize: `400`
-
-The response is `PagedResult<ApprovalQueueItemDto>` and includes pending approval id, case link data, priority, case status, request reason, requester, assignee, due date, query-time overdue flag, and latest case row version.
-
-## Dashboard
-
-`GET /api/dashboard/summary` and `GET /api/dashboard/breakdowns` require authentication.
-
-- Missing token: `401`
-- Analyst token: `200`, scoped to cases assigned to the current Analyst
-- Manager/Admin token: `200`, scoped globally
-
-Summary response body:
+`DashboardSummaryDto`:
 
 ```json
 {
   "openCases": 42,
   "overdueOpenCases": 7,
   "pendingApprovals": 3,
-  "averageOpenAgeHours": 18.5,
+  "averageOpenAgeHours": 58.4,
   "slaBreachRate": 0.1667
 }
 ```
 
-Summary metrics are calculated from `Cases` and `ApprovalRequests` through EF queries. Open cases are cases where `Status != Closed`. Overdue open cases are open cases where `DueAtUtc` is earlier than the captured UTC query time. Pending approvals count only `ApprovalRequests` with `Status == Pending`. `slaBreachRate` is `overdueOpenCases / openCases`, or `0` when there are no open cases.
-
-Breakdowns response body:
+`DashboardBreakdownsDto`:
 
 ```json
 {
   "byStatus": [
-    {
-      "key": "Assigned",
-      "label": "Assigned",
-      "count": 12,
-      "routeQuery": {
-        "status": "Assigned"
-      }
-    }
+    { "key": "PendingApproval", "label": "PendingApproval", "count": 3, "routeQuery": { "status": "PendingApproval" } }
   ],
-  "byPriority": [],
-  "byCaseType": [],
-  "byAssignee": []
+  "byPriority": [
+    { "key": "High", "label": "High", "count": 9, "routeQuery": { "priority": "High" } }
+  ],
+  "byCaseType": [
+    { "key": "guid", "label": "Vendor Approval Issue", "count": 5, "routeQuery": { "caseTypeId": "guid" } }
+  ],
+  "byAssignee": [
+    { "key": "guid", "label": "Alex Analyst", "count": 8, "routeQuery": { "assignedToUserId": "guid" } }
+  ]
 }
 ```
 
-Breakdowns group accessible cases by status, priority, case type, and assignee. Route query values are intended for existing `/cases` drill-down links. The dashboard does not persist metrics, create a dashboard table, export reports, or use background jobs.
-
-## Approval Decisions
-
-`POST /api/approvals/{approvalId}/approve` requires the Manager or Admin role.
-
-Request body:
+`TimelineEventDto`:
 
 ```json
 {
-  "decisionReason": "Approved for closure.",
-  "rowVersion": "optional-base64-case-row-version"
+  "id": "guid",
+  "action": "ClosureRequested",
+  "actor": { "id": "guid", "displayName": "Alex Analyst" },
+  "createdAtUtc": "2026-06-04T13:00:00Z",
+  "description": "Closure approval requested: Work is complete."
 }
 ```
 
-`decisionReason` is optional for approval. If `rowVersion` is supplied, stale values return `409`.
-
-Successful approval marks the `ApprovalRequest` as `Approved`, sets reviewer and decision timestamp, changes the case to `Closed`, sets `ClosedAtUtc`, writes `StatusHistory` for `PendingApproval -> Closed`, and writes an `ApprovalApproved` business audit event.
-
-`POST /api/approvals/{approvalId}/reject` requires the Manager or Admin role.
-
-Request body:
+Handled application errors generally use:
 
 ```json
-{
-  "decisionReason": "More review is required before closure.",
-  "rowVersion": "optional-base64-case-row-version"
-}
+{ "message": "This case was updated by another user. Please refresh." }
 ```
 
-`decisionReason` is required for rejection. Successful rejection marks the `ApprovalRequest` as `Rejected`, sets reviewer and decision timestamp, changes the case to `InReview`, leaves `ClosedAtUtc` unset, writes `StatusHistory` for `PendingApproval -> InReview`, and writes an `ApprovalRejected` business audit event.
-
-Decision behavior:
-
-- Missing token: `401`
-- Analyst token: `403`
-- Missing approval id: `404`
-- Missing reject reason or invalid supplied row version: `400`
-- Already decided approval, stale supplied row version, or related case not pending approval: `409`
-- Success: `200` with latest case row version
-
-## Case Type Lookup
-
-`GET /api/case-types` requires authentication and returns active case types only.
-
-Response body:
-
-```json
-[
-  {
-    "id": "00000000-0000-0000-0000-000000000000",
-    "name": "Vendor Approval Issue"
-  }
-]
-```
-
-No case type mutation endpoints are exposed.
-
-## Analyst Lookup
-
-`GET /api/users/analysts` requires the Manager or Admin role and returns active Analyst users only.
-
-Response body:
-
-```json
-[
-  {
-    "id": "00000000-0000-0000-0000-000000000000",
-    "displayName": "Alex Analyst",
-    "email": "analyst1@opsflow.local"
-  }
-]
-```
-
-No user create, edit, delete, role management, or admin user configuration endpoints are exposed.
+ASP.NET Core model binding and malformed JSON can return framework validation/problem responses.
 
 ## Error Handling
 
-Validation and business-rule failures return readable error messages using the current simple `{ "message": "..." }` shape where controllers handle application exceptions. Authorization failures use standard `401`/`403` behavior. Status, assignment, closure-request, and approval stale-write detection return `409`.
+| Status | Meaning |
+| --- | --- |
+| `400` | Invalid request body, invalid enum/query value, missing required command field, invalid `rowVersion` format. |
+| `401` | Missing/invalid authentication or invalid login. |
+| `403` | Role policy or object-level authorization failure. |
+| `404` | Requested case, approval, or case type does not exist. |
+| `409` | Stale `RowVersion`, duplicate pending approval, already-decided approval, or related case state conflict. |
+| `422` | Syntactically valid request rejected by status workflow/domain rule; also used when case creation has no active SLA rule. |
+
+Examples:
+
+```json
+{ "message": "Invalid targetStatus." }
+```
+
+```json
+{ "message": "High and Critical case closure requires the approval workflow." }
+```
+
+```json
+{ "message": "This case already has a pending approval request." }
+```
+
+`Forbid()` responses may have an empty body. Several not-found paths also return an empty body.
+
+## RowVersion Policy
+
+| Endpoint | Required | Missing | Invalid format | Stale supplied value | Success response |
+| --- | --- | --- | --- | --- | --- |
+| `PATCH /api/cases/{caseId}/assign` | No | Allowed | `400` | `409` | `CaseDetailDto` with fresh `rowVersion` |
+| `PATCH /api/cases/{caseId}/status` | Yes | `400` | `400` | `409` | `CaseDetailDto` with fresh `rowVersion` |
+| `POST /api/cases/{caseId}/closure-request` | Yes | `400` | `400` | `409` | `ApprovalRequestDto` with fresh case `rowVersion` |
+| `POST /api/approvals/{approvalId}/approve` | No | Allowed | `400` | `409` | `ApprovalDecisionResultDto` with fresh case `rowVersion` |
+| `POST /api/approvals/{approvalId}/reject` | No | Allowed | `400` | `409` | `ApprovalDecisionResultDto` with fresh case `rowVersion` |
+
+Approval decisions also require a pending approval request and a related case currently in `PendingApproval`.
+
+## Case List
+
+`GET /api/cases`
+
+Query parameters:
+
+- `page` default `1`; must be `>= 1`.
+- `pageSize` default `20`; allowed `1..100`.
+- `search` matches case number, title, or description.
+- `status` accepts `New`, `Assigned`, `InReview`, `WaitingInfo`, `Resolved`, `PendingApproval`, `Closed`, `Reopened`.
+- `priority` accepts `Critical`, `High`, `Medium`, `Low`.
+- `caseTypeId` filters by case type.
+- `assignedToUserId` filters by assignee for Manager/Admin.
+- `overdue=true|false` filters by query-time overdue formula.
+- `sortBy` accepts `caseNumber`, `createdAtUtc`, `dueAtUtc`, `priority`, `status`.
+- `sortDirection` accepts `asc` or `desc`; default is `desc`.
+
+Analysts are always server-scoped to the current user's assigned cases. If an Analyst supplies a different `assignedToUserId`, the API returns `403`.
+
+## Case Detail
+
+`GET /api/cases/{caseId}` returns the latest case representation and `rowVersion`. It enforces the same access rule as the queue: assigned Analyst, Manager, or Admin. `isOverdue` is derived at query time from `Status != Closed && nowUtc > DueAtUtc`.
+
+## Case Create
+
+`POST /api/cases` is Manager/Admin-only.
+
+Request:
+
+```json
+{
+  "title": "Vendor approval missing",
+  "description": "Approval record is incomplete.",
+  "caseTypeId": "guid",
+  "priority": "High"
+}
+```
+
+Rules:
+
+- `title`, `caseTypeId`, and `priority` are required.
+- `description` is accepted up to 4000 characters.
+- `priority` must be a named enum value, not a numeric enum value.
+- New case starts `New` and unassigned.
+- `caseNumber` is generated.
+- `DueAtUtc` is calculated from the active SLA rule for `CaseTypeId + Priority`.
+- `CaseCreated` audit event is written.
+- `CreatedAtUtc` and `UpdatedAtUtc` are set to current UTC time.
+- Missing case type returns `404`.
+- Missing active SLA rule returns `422`.
+- Success returns `201 Created` with `CaseDetailDto`.
+
+## Assignment
+
+`PATCH /api/cases/{caseId}/assign` is Manager/Admin-only.
+
+Request:
+
+```json
+{
+  "assignedToUserId": "guid",
+  "reason": "Routing to the owning analyst.",
+  "rowVersion": "AAAAAAAAB9E="
+}
+```
+
+Rules:
+
+- Target user must be an active Analyst.
+- `reason` is required and limited to 500 characters.
+- Closed cases are rejected.
+- Same-assignee requests are rejected.
+- `rowVersion` is optional; stale supplied values return `409`.
+- If the case is `New`, assignment also moves it to `Assigned`.
+- Writes `AssignmentHistory`, `Assigned` audit event, and status history for `New -> Assigned`.
+- Updates `UpdatedAtUtc`.
+- The implementation allows reassignment for non-closed states, including `Resolved` and `PendingApproval`, subject to Manager/Admin role and other validation.
+
+## Status Transition
+
+`PATCH /api/cases/{caseId}/status`
+
+Request:
+
+```json
+{
+  "targetStatus": "Resolved",
+  "reason": "Investigation complete.",
+  "rowVersion": "AAAAAAAAB9E="
+}
+```
+
+Rules:
+
+- `targetStatus`, `reason`, and `rowVersion` are required.
+- Direct `PendingApproval` is rejected with `422`.
+- Stale `rowVersion` returns `409`.
+- Assigned Analysts can use only their assigned-case transitions.
+- Managers/Admins can use the Manager/Admin transition set.
+
+Allowed normal status transitions:
+
+| From | To | Analyst | Manager/Admin |
+| --- | --- | --- | --- |
+| `Assigned` | `InReview`, `WaitingInfo` | Yes, if assigned | Yes |
+| `InReview` | `WaitingInfo`, `Resolved` | Yes, if assigned | Yes |
+| `WaitingInfo` | `InReview`, `Resolved` | Yes, if assigned | Yes |
+| `Resolved` | `Closed` | No | Low/Medium only |
+| `Closed` | `Reopened` | No | Yes |
+| `Reopened` | `InReview` | Yes, if assigned | Yes |
+| `Reopened` | `WaitingInfo` | No | Yes |
+
+Timestamp side effects:
+
+- Target `Resolved` sets `ResolvedAtUtc` if unset.
+- Target `Closed` sets `ClosedAtUtc`.
+- Target `Reopened` clears `ClosedAtUtc`.
+- Every accepted transition updates `UpdatedAtUtc`.
+
+## Closure Request
+
+`POST /api/cases/{caseId}/closure-request`
+
+Request:
+
+```json
+{
+  "requestReason": "High-priority work is resolved and ready for closure.",
+  "rowVersion": "AAAAAAAAB9E="
+}
+```
+
+Rules:
+
+- Allowed only for `Resolved` High/Critical cases.
+- Assigned Analyst can request for own assigned case.
+- Manager/Admin can request globally.
+- Low/Medium cases are rejected because they close through normal status workflow.
+- Non-`Resolved` cases are rejected.
+- Duplicate pending approval returns `409`.
+- `rowVersion` is required; stale values return `409`.
+- Success sets case status to `PendingApproval`, creates `ApprovalRequest`, writes `StatusHistory`, writes `ClosureRequested`, updates `UpdatedAtUtc`, and returns `ApprovalRequestDto`.
+
+## Pending Approvals
+
+`GET /api/approvals/pending?page=1&pageSize=20` is Manager/Admin-only. `pageSize` is limited to `1..100`.
+
+The response is `PagedResult<ApprovalQueueItemDto>` ordered by request time. Each item includes `approvalId`, `caseId`, case number/title, priority, current case status, request reason, requester, assignee, due date, query-time overdue flag, and latest case `rowVersion`.
+
+## Approval Decisions
+
+Approve:
+
+`POST /api/approvals/{approvalId}/approve`
+
+```json
+{
+  "decisionReason": "Closure approved.",
+  "rowVersion": "AAAAAAAAB9E="
+}
+```
+
+Rules:
+
+- Manager/Admin-only.
+- Pending approval request required.
+- Related case must be `PendingApproval`.
+- Case priority must be High/Critical.
+- `decisionReason` is optional; blank is treated as null.
+- Optional supplied `rowVersion` is checked for staleness.
+- Marks approval `Approved`, sets reviewer and decision timestamp, moves case to `Closed`, sets `ClosedAtUtc`, writes status history, writes `ApprovalApproved`, and returns latest `rowVersion`.
+
+Reject:
+
+`POST /api/approvals/{approvalId}/reject`
+
+```json
+{
+  "decisionReason": "Additional evidence is required.",
+  "rowVersion": "AAAAAAAAB9E="
+}
+```
+
+Rules:
+
+- Manager/Admin-only.
+- Pending approval request required.
+- Related case must be `PendingApproval`.
+- Case priority must be High/Critical.
+- `decisionReason` is required.
+- Optional supplied `rowVersion` is checked for staleness.
+- Marks approval `Rejected`, sets reviewer and decision timestamp, moves case to `InReview`, leaves `ClosedAtUtc` unset, writes status history, writes `ApprovalRejected`, and returns latest `rowVersion`.
+
+Conflict cases include already-decided approval, stale supplied `RowVersion`, duplicate pending approval, and related case not `PendingApproval`.
+
+## Notes And Timeline
+
+Notes use the same object-level access as case detail.
+
+`POST /api/cases/{caseId}/notes` request:
+
+```json
+{ "body": "Follow-up captured for the operations team." }
+```
+
+The body is trimmed, required, limited to 2000 characters, and stored as plain text. Adding a note writes `NoteAdded`.
+
+Timeline events are returned in chronological order and include actor display, timestamp, action, and description. Supported actions are `CaseCreated`, `NoteAdded`, `Assigned`, `StatusChanged`, `ClosureRequested`, `ApprovalApproved`, `ApprovalRejected`, and `CaseReopened`.
+
+## Dashboard
+
+Dashboard endpoints are role-aware:
+
+- Manager/Admin metrics use all cases and all pending approvals.
+- Analyst metrics use assigned cases and pending approvals for assigned cases.
+
+Summary formulae:
+
+- `openCases`: scoped cases where `Status != Closed`.
+- `overdueOpenCases`: open scoped cases where `DueAtUtc < nowUtc`.
+- `pendingApprovals`: pending approval requests in role scope.
+- `averageOpenAgeHours`: average `(nowUtc - CreatedAtUtc)` over open scoped cases.
+- `slaBreachRate`: `overdueOpenCases / openCases`, or `0` when no open cases exist.
+
+Breakdowns group scoped cases by status, priority, case type, and assignee. Each item may include route query values used by the Angular queue drill-down. There is no stored summary table or background metrics job.
+
+## Lookups
+
+- `GET /api/case-types` returns active case types and is read-only.
+- `GET /api/users/analysts` returns active Analyst users and is Manager/Admin-only.
+- No mutation endpoints are exposed for users, roles, case types, or SLA rules.
 
 ## Current Boundary
 
-No export, notification, note edit/delete, attachments, rich text, user management, role management, or case type administration endpoints are implemented.
+The API does not expose user administration, role administration, case type mutation, SLA rule mutation, note edit/delete, file attachment, export/report builder, notification, worker-control, or real-time messaging endpoints.

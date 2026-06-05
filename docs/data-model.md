@@ -1,123 +1,121 @@
 # Data Model
 
-PR-01A aligns the SQL Server schema with the locked OpsFlow direction. It is a foundation schema only; authentication endpoints, case APIs, workflow actions, dashboard endpoints, and Angular business screens are later PR scope.
+The data model centers on cases, SLA rules, workflow history, approval requests, and business audit events. See [ERD](erd.md) for the complete diagram.
 
 ## Entity Summary
 
-- `AspNetUsers`: ASP.NET Core Identity users with OpsFlow profile fields: `DisplayName`, `IsActive`, `CreatedAtUtc`, and `UpdatedAtUtc`.
-- `AspNetRoles`: ASP.NET Core Identity roles. Seeded roles are exactly `Analyst`, `Manager`, and `Admin`.
-- `AspNetUserRoles` and related Identity tables: Identity-compatible role membership, claims, logins, and tokens.
-- `CaseTypes`: active business exception categories.
-- `SlaRules`: active target hours by case type and priority. Locked targets are Low 120, Medium 72, High 24, and Critical 8 calendar hours.
-- `Cases`: core exception records with due dates, assignment, lifecycle timestamps, status, and rowversion concurrency.
-- `CaseNotes`: case-level notes.
-- `StatusHistories`: workflow timeline entries.
-- `AssignmentHistories`: assignment timeline entries with required business reason.
-- `ApprovalRequests`: pending/approved/rejected manager approval samples.
-- `AuditLogs`: business audit timeline entries.
+| Entity | Purpose |
+| --- | --- |
+| `AspNetUsers`, `AspNetRoles`, `AspNetUserRoles` | Identity-backed authentication and three-role authorization. |
+| `CaseTypes` | Active case categories used by case creation and SLA lookup. |
+| `SlaRules` | Active target-hour rules keyed by `CaseTypeId + Priority`. |
+| `Cases` | Main workflow aggregate with status, priority, assignee, SLA due date, lifecycle timestamps, and `RowVersion`. |
+| `CaseNotes` | Plain-text case notes with author and timestamp. |
+| `StatusHistories` | Status transition history with actor, reason, and timestamp. |
+| `AssignmentHistories` | Assignment/reassignment history with from/to users, actor, reason, and timestamp. |
+| `ApprovalRequests` | High/Critical closure approval requests and decisions. |
+| `AuditLogs` | Business audit events used by the case timeline. |
 
-## Workflow Fields
+## SLA Rules
 
-Case statuses are:
+`SlaRules` are selected by active `CaseTypeId + Priority`. Seed data creates active rules for every active case type and every priority:
 
-- New
-- Assigned
-- InReview
-- WaitingInfo
-- Resolved
-- PendingApproval
-- Closed
-- Reopened
+| Priority | TargetHours |
+| --- | ---: |
+| `Low` | 120 |
+| `Medium` | 72 |
+| `High` | 24 |
+| `Critical` | 8 |
 
-Audit actions are:
+The API calculates `DueAtUtc` at case creation:
 
-- CaseCreated
-- NoteAdded
-- Assigned
-- StatusChanged
-- ClosureRequested
-- ApprovalApproved
-- ApprovalRejected
-- CaseReopened
-
-Approval request statuses are:
-
-- Pending
-- Approved
-- Rejected
-
-## Mermaid ERD
-
-```mermaid
-erDiagram
-  AspNetUsers ||--o{ Cases : created
-  AspNetUsers ||--o{ Cases : assigned
-  AspNetUsers ||--o{ CaseNotes : authors
-  AspNetUsers ||--o{ StatusHistories : changes
-  AspNetUsers ||--o{ AssignmentHistories : assigns
-  AspNetUsers ||--o{ ApprovalRequests : requests_reviews
-  AspNetUsers ||--o{ AuditLogs : acts
-  AspNetRoles ||--o{ AspNetUserRoles : has
-  AspNetUsers ||--o{ AspNetUserRoles : has
-  CaseTypes ||--o{ SlaRules : has
-  CaseTypes ||--o{ Cases : categorizes
-  Cases ||--o{ CaseNotes : has
-  Cases ||--o{ StatusHistories : has
-  Cases ||--o{ AssignmentHistories : has
-  Cases ||--o{ ApprovalRequests : has
-
-  AspNetUsers {
-    uniqueidentifier Id PK
-    nvarchar Email
-    nvarchar UserName
-    nvarchar DisplayName
-    bit IsActive
-    datetime2 CreatedAtUtc
-    datetime2 UpdatedAtUtc
-  }
-
-  AspNetRoles {
-    uniqueidentifier Id PK
-    nvarchar Name
-    nvarchar NormalizedName
-  }
-
-  Cases {
-    uniqueidentifier Id PK
-    nvarchar CaseNumber UK
-    nvarchar Title
-    nvarchar Description
-    uniqueidentifier CaseTypeId FK
-    nvarchar Priority
-    nvarchar Status
-    uniqueidentifier AssignedToUserId FK
-    uniqueidentifier CreatedByUserId FK
-    datetime2 DueAtUtc
-    datetime2 ResolvedAtUtc
-    datetime2 ClosedAtUtc
-    datetime2 CreatedAtUtc
-    datetime2 UpdatedAtUtc
-    rowversion RowVersion
-  }
-
-  AssignmentHistories {
-    uniqueidentifier Id PK
-    uniqueidentifier CaseId FK
-    uniqueidentifier FromUserId FK
-    uniqueidentifier ToUserId FK
-    uniqueidentifier AssignedByUserId FK
-    nvarchar Reason
-    datetime2 CreatedAtUtc
-  }
+```text
+DueAtUtc = CreatedAtUtc + TargetHours
 ```
 
-## Important Constraints
+The lookup first verifies the case type exists, then requires a single active SLA rule. Missing case type returns not found; missing active SLA rule returns a workflow/domain error from case creation.
 
-- Enums are stored as strings for readable SQL.
-- `Cases.CaseNumber`, `AspNetUsers.NormalizedUserName`, `AspNetRoles.NormalizedName`, and `CaseTypes.Name` are unique.
-- Active SLA rules are unique by `CaseTypeId` and `Priority`.
-- Pending approvals are constrained to one pending request per case.
-- History and audit relationships avoid cascade delete.
-- `Cases.RowVersion` is configured for SQL Server optimistic concurrency.
-- `IsOverdue` is not persisted; it is calculated by query/DTO logic.
-- Approval requirement is not stored on `Cases`; later workflow logic derives it from High/Critical priority and case state.
+Calendar hours are used. `IsOverdue` is not a `Cases` column; it is derived at query time:
+
+```text
+Status != Closed && nowUtc > DueAtUtc
+```
+
+## Cases
+
+Important `Cases` fields:
+
+- `CaseNumber`: unique generated number in `OPF-{year}-{sequence}` format.
+- `CaseTypeId`: required relationship to `CaseTypes`.
+- `Priority`: enum stored as a string.
+- `Status`: enum stored as a string.
+- `AssignedToUserId`: nullable; new cases start unassigned.
+- `CreatedByUserId`: required Identity user relationship.
+- `DueAtUtc`: creation-time SLA due date.
+- `ResolvedAtUtc`: set when a case first reaches `Resolved`.
+- `ClosedAtUtc`: set on closure and cleared on reopen.
+- `UpdatedAtUtc`: updated by workflow mutations.
+- `RowVersion`: SQL rowversion / EF Core concurrency token returned to clients as Base64.
+
+Approval requirement is derived from priority and state. There is no persisted `RequiresApproval` flag.
+
+## Enums
+
+Workflow enums are stored as strings for readable SQL.
+
+Case statuses:
+
+```text
+New, Assigned, InReview, WaitingInfo, Resolved, PendingApproval, Closed, Reopened
+```
+
+Priorities:
+
+```text
+Critical, High, Medium, Low
+```
+
+Approval request statuses:
+
+```text
+Pending, Approved, Rejected
+```
+
+Audit actions:
+
+```text
+CaseCreated, NoteAdded, Assigned, StatusChanged, ClosureRequested,
+ApprovalApproved, ApprovalRejected, CaseReopened
+```
+
+Allowed values are enforced by application validation and EF enum conversion. The current EF model does not define SQL check constraints for enum values.
+
+## Data Integrity And Invariants
+
+- Identity maintains unique normalized users and roles through ASP.NET Core Identity indexes.
+- `CaseTypes.Name` is unique.
+- `Cases.CaseNumber` is unique.
+- Active `SlaRules` are unique by `CaseTypeId + Priority`.
+- One pending approval per case is enforced by a filtered unique index.
+- Case history tables use restricted/no-action delete behavior.
+- `Cases.RowVersion` provides optimistic concurrency for case workflow mutations when the endpoint supplies or requires it.
+- Approval decisions require a pending request.
+- Approval decisions require the related case to be `PendingApproval`.
+- High/Critical cases close through approval; Low/Medium cases close through normal Manager/Admin status transition.
+- Status changes, assignment changes, closure requests, and approval decisions write history/audit records in the same service operation as the case update.
+
+## Audit Metadata
+
+`AuditLogs` stores business timeline events, with metadata shaped by the service that created the event:
+
+- Assignment metadata includes from/to user ids and reason.
+- Status metadata includes from/to status and reason.
+- Closure request metadata includes request reason and approval request id.
+- Approval decision metadata includes approval request id, from/to status, and decision reason.
+- Note metadata includes note id.
+
+The case timeline reads `AuditLogs` for supported case business actions and renders actor, timestamp, action, and a readable description.
+
+## Case Number Concurrency
+
+Case numbers are generated by reading the current maximum sequence for the year and assigning the next `OPF-{year}-{sequence}` value. The database unique constraint on `CaseNumber` is the final guard against duplicate numbers. The current service does not implement a retry loop for a duplicate generated number.
